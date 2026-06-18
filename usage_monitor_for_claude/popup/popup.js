@@ -133,6 +133,7 @@ function updateStatus(status) {
     } else {
         statusState = {};
         els.statusText.textContent = status.text || '';
+        els.statusText.title = status.is_error ? (status.text || '') : '';
         els.statusSection.classList.toggle('error', !!status.is_error);
     }
 }
@@ -167,6 +168,8 @@ function tickStatusText() {
     }
 
     els.statusText.textContent = parts.join(' \u00b7 ');
+    // Errors are raw API messages that can overflow; reveal the full text on hover.
+    els.statusText.title = statusState.error ? els.statusText.textContent : '';
 }
 
 /**

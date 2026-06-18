@@ -144,10 +144,10 @@ Produces `dist/UsageMonitorForClaude.exe` (~12.5 MB), a single-file executable t
 The popup UI lives in [`usage_monitor_for_claude/popup/`](usage_monitor_for_claude/popup/) as separate HTML, CSS, and JS files. To preview and iterate on the UI without running the full app:
 
 ```bash
-start http://localhost:8080/dev.html && python -m http.server 8080 -d usage_monitor_for_claude/popup
+start http://localhost:8080/usage_monitor_for_claude/popup/dev.html && python -m http.server 8080
 ```
 
-This starts a local server and opens the dev preview in your default browser. Use the buttons to switch between data presets (full, minimal, error, loading) and test CSS/JS changes with instant feedback.
+This starts a local server and opens the dev preview in your default browser. Use the buttons to switch between data presets (full, minimal, error, loading) and the language dropdown to preview every locale (so you can spot strings that overflow the popup width). Test CSS/JS changes with instant feedback.
 
 ### Create a Release
 

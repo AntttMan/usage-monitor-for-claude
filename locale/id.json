@@ -57,9 +57,9 @@
     "notify_update_title": "Claude Code Diperbarui",
     "notify_update": "Claude Code diperbarui dari {old} ke {new}.",
     "server_error": "API Anthropic tidak tersedia sementara (HTTP {code}).",
-    "status_updated": "Diperbarui {duration} yang lalu",
-    "status_updated_s": "Diperbarui {s}d yang lalu",
-    "status_next_update": "Pembaruan berikutnya dalam {duration}",
+    "status_updated": "Diperbarui {duration} lalu",
+    "status_updated_s": "Diperbarui {s}d lalu",
+    "status_next_update": "Pembaruan berik.: {duration}",
     "status_refreshing": "Memperbarui...",
     "already_running": "Usage Monitor for Claude v{running_version} sudah berjalan.\n\nApakah Anda ingin mengganti instans yang sedang berjalan?"
 }
