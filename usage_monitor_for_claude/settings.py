@@ -26,7 +26,7 @@ from pathlib import Path
 __all__ = [
     'ALERT_TIME_AWARE', 'ALERT_TIME_AWARE_BELOW',
     'BAR_BG', 'BAR_FG', 'BAR_FG_WARN', 'BAR_MARKER', 'BG',
-    'CURRENCY_SYMBOL',
+    'COMPACT_HIDE', 'CURRENCY_SYMBOL',
     'FG', 'FG_DIM', 'FG_HEADING', 'FG_LINK',
     'ICON_DARK', 'ICON_FIELDS', 'ICON_LIGHT', 'IDLE_PAUSE',
     'LANGUAGE', 'MAX_BACKOFF',
@@ -53,7 +53,7 @@ _PERCENT_KEYS = frozenset({'alert_time_aware_below'})
 _STRING_KEYS = frozenset({'currency_symbol', 'language'})
 _COMMAND_KEYS = frozenset({'on_reset_command', 'on_startup_command', 'on_threshold_command'})
 _BOOL_KEYS = frozenset({'alert_time_aware'})
-_STRING_LIST_KEYS = frozenset({'tooltip_fields'})
+_STRING_LIST_KEYS = frozenset({'tooltip_fields', 'compact_hide'})
 _WILDCARD_STRING_LIST_KEYS = frozenset({'popup_fields'})
 _VALID_BAR_MODES = frozenset({'utilization', 'overage'})
 
@@ -293,6 +293,9 @@ TOOLTIP_FIELDS: list[str] = _S.get('tooltip_fields', ['five_hour', 'seven_day'])
 
 # Popup fields
 POPUP_FIELDS: list[str] = _S.get('popup_fields', ['*'])
+
+# Sections and usage bars hidden while the popup is pinned (compact view)
+COMPACT_HIDE: list[str] = _S.get('compact_hide', [])
 
 # Alert thresholds
 ALERT_TIME_AWARE: bool = _S.get('alert_time_aware', True)

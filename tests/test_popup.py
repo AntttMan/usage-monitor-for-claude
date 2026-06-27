@@ -83,6 +83,16 @@ class TestUsageEntries(unittest.TestCase):
         self.assertIs(entries[0][1], five_hour)
         self.assertIs(entries[1][1], seven_day)
 
+    def test_entry_includes_field_key(self):
+        """Each entry's 4th element is the raw API field name."""
+        usage = {
+            'five_hour': {'utilization': 42, 'resets_at': '2026-01-01T00:00:00Z'},
+            'seven_day_opus': {'utilization': 10, 'resets_at': '2026-01-07T00:00:00Z'},
+        }
+        entries = _usage_entries(usage)
+        keys = [e[3] for e in entries]
+        self.assertEqual(keys, ['five_hour', 'seven_day_opus'])
+
     def test_empty_usage_returns_empty(self):
         """Empty usage dict returns no entries."""
         self.assertEqual(_usage_entries({}), [])
@@ -298,6 +308,19 @@ class TestSnapshotToDict(unittest.TestCase):
         pcts = [b['pct_text'] for b in result['usage']]
         self.assertEqual(pcts, ['10%', '20%', '30%'])
 
+    @patch('usage_monitor_for_claude.popup.elapsed_pct', return_value=None)
+    @patch('usage_monitor_for_claude.popup.time_until', return_value='')
+    @patch('usage_monitor_for_claude.popup.divider_positions', return_value=[])
+    def test_usage_bar_includes_field_key(self, _mock_div, _mock_tu, _mock_ep):
+        """Each usage bar dict carries its API field name for compact hiding."""
+        usage = {
+            'five_hour': {'utilization': 10, 'resets_at': '2026-01-01T05:00:00Z'},
+            'seven_day_opus': {'utilization': 30, 'resets_at': '2026-01-07T00:00:00Z'},
+        }
+        result = _snapshot_to_dict(_snap(usage=usage), installations=[])
+        keys = [bar['key'] for bar in result['usage']]
+        self.assertEqual(keys, ['five_hour', 'seven_day_opus'])
+
     @patch('usage_monitor_for_claude.popup.POPUP_FIELDS', ['typo_field', 'seven_day'])
     @patch('usage_monitor_for_claude.popup.elapsed_pct', return_value=None)
     @patch('usage_monitor_for_claude.popup.time_until', return_value='')
@@ -454,9 +477,15 @@ class TestInitConfig(unittest.TestCase):
     """Tests for _init_config - builds the JS init() config object."""
 
     def test_top_level_keys(self):
-        """Config has colors, t (translations), app_version, and data."""
+        """Config has colors, t (translations), app_version, compact_hide, and data."""
         config = _init_config(_snap())
-        self.assertEqual(set(config.keys()), {'colors', 't', 'app_version', 'data'})
+        self.assertEqual(set(config.keys()), {'colors', 't', 'app_version', 'compact_hide', 'data'})
+
+    @patch('usage_monitor_for_claude.popup.COMPACT_HIDE', ['account', 'seven_day_opus'])
+    def test_compact_hide_from_settings(self):
+        """compact_hide is taken from the COMPACT_HIDE setting."""
+        config = _init_config(_snap())
+        self.assertEqual(config['compact_hide'], ['account', 'seven_day_opus'])
 
     def test_colors_from_settings(self):
         """Color values come from settings module constants."""

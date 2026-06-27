@@ -23,7 +23,7 @@ from . import __version__
 from .claude_cli import CHANGELOG_URL, find_installations
 from .formatting import divider_positions, elapsed_pct, expand_popup_fields, field_period, format_credits, popup_label, time_until
 from .i18n import T
-from .settings import BAR_BG, BAR_DIVIDER, BAR_FG, BAR_FG_WARN, BAR_MARKER, BG, FG, FG_DIM, FG_HEADING, FG_LINK, POPUP_FIELDS
+from .settings import BAR_BG, BAR_DIVIDER, BAR_FG, BAR_FG_WARN, BAR_MARKER, BG, COMPACT_HIDE, FG, FG_DIM, FG_HEADING, FG_LINK, POPUP_FIELDS
 
 _POPUP_DIR = Path(__file__).parent / 'popup'
 _BASELINE_DPI = 96
@@ -57,10 +57,14 @@ if TYPE_CHECKING:
 # Data helpers
 # ---------------------------------------------------------------------------
 
-def _usage_entries(usage: dict[str, Any]) -> list[tuple[str, dict[str, Any] | None, int | None]]:
-    """Return the list of usage entry tuples from the given usage data."""
+def _usage_entries(usage: dict[str, Any]) -> list[tuple[str, dict[str, Any] | None, int | None, str]]:
+    """Return ``(label, data, period, field)`` tuples from the given usage data.
+
+    The raw *field* name is included so the popup can hide individual bars
+    by field name when the pinned compact view is configured.
+    """
     fields = expand_popup_fields(POPUP_FIELDS, usage)
-    return [(popup_label(key), usage.get(key), field_period(key)) for key in fields]
+    return [(popup_label(key), usage.get(key), field_period(key), key) for key in fields]
 
 
 def _snapshot_to_dict(
@@ -91,7 +95,7 @@ def _snapshot_to_dict(
     # Usage bars
     usage = []
     if snap.usage:
-        for label, entry, period in _usage_entries(snap.usage):
+        for label, entry, period, field in _usage_entries(snap.usage):
             if not entry or entry.get('utilization') is None:
                 continue
             pct = entry.get('utilization', 0) or 0
@@ -101,6 +105,7 @@ def _snapshot_to_dict(
             marker_rel = max(0.0, min(1.0, time_pct / 100)) if time_pct is not None else None
 
             usage.append({
+                'key': field,
                 'label': label,
                 'pct_text': f'{pct:.0f}%',
                 'fill_pct': max(0.0, min(1.0, pct / 100)),
@@ -171,6 +176,7 @@ def _init_config(snap: CacheSnapshot, next_poll_time: float | None = None) -> di
             'duration_hm': T['duration_hm'], 'duration_m': T['duration_m'], 'duration_s': T['duration_s'],
         },
         'app_version': __version__,
+        'compact_hide': COMPACT_HIDE,
         'data': _snapshot_to_dict(snap, next_poll_time=next_poll_time),
     }
 
