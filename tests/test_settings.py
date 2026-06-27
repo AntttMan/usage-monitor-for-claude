@@ -390,6 +390,31 @@ class TestSettingsValidation(unittest.TestCase):
         self.assertEqual(result['poll_fast'], 60)
         self.assertEqual(result['bg'], '#000')
 
+    # time_format validation
+
+    def test_time_format_24h_valid(self):
+        """time_format '24h' passes through unchanged."""
+        result, mock = self._run_validate({'time_format': '24h'})
+        self.assertEqual(result['time_format'], '24h')
+        mock.windll.user32.MessageBoxW.assert_not_called()
+
+    def test_time_format_12h_valid(self):
+        """time_format '12h' passes through unchanged."""
+        result, mock = self._run_validate({'time_format': '12h'})
+        self.assertEqual(result['time_format'], '12h')
+        mock.windll.user32.MessageBoxW.assert_not_called()
+
+    def test_time_format_unknown_value_dropped(self):
+        """Unknown time_format value is dropped with a MessageBox."""
+        result, mock = self._run_validate({'time_format': 'military'})
+        self.assertNotIn('time_format', result)
+        mock.windll.user32.MessageBoxW.assert_called_once()
+
+    def test_time_format_non_string_dropped(self):
+        """Non-string time_format value is dropped."""
+        result, _ = self._run_validate({'time_format': 24})
+        self.assertNotIn('time_format', result)
+
     # Non-negative numeric validation
 
     def test_idle_pause_zero_valid(self):
@@ -704,6 +729,30 @@ class TestIconFieldsValidation(unittest.TestCase):
         result, mock = self._run_validate({'icon_fields': ['future_field:overage', 'another:utilization']})
         self.assertEqual(result['icon_fields'], ['future_field:overage', 'another:utilization'])
         mock.windll.user32.MessageBoxW.assert_not_called()
+
+
+class TestDetectSystemTimeFormat(unittest.TestCase):
+    """Tests for _detect_system_time_format() Windows locale detection."""
+
+    def _detect(self, chars: int, itime_value: int) -> str:
+        """Run detection with GetLocaleInfoEx mocked to return *chars* and write *itime_value*."""
+        mock_ctypes = MagicMock()
+        mock_ctypes.wintypes.DWORD.return_value.value = itime_value
+        mock_ctypes.windll.kernel32.GetLocaleInfoEx.return_value = chars
+        with patch.object(settings_mod, 'ctypes', mock_ctypes):
+            return settings_mod._detect_system_time_format()
+
+    def test_itime_one_is_24h(self):
+        """LOCALE_ITIME of 1 maps to a 24-hour clock."""
+        self.assertEqual(self._detect(chars=2, itime_value=1), '24h')
+
+    def test_itime_zero_is_12h(self):
+        """LOCALE_ITIME of 0 maps to a 12-hour clock."""
+        self.assertEqual(self._detect(chars=2, itime_value=0), '12h')
+
+    def test_query_failure_falls_back_to_24h(self):
+        """A failed locale query (0 chars written) falls back to 24-hour."""
+        self.assertEqual(self._detect(chars=0, itime_value=0), '24h')
 
 
 class TestIconFieldsDefault(unittest.TestCase):

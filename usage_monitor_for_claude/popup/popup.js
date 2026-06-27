@@ -416,14 +416,12 @@ function updateBarElement(div, entry) {
 
     let resetEl = div.querySelector('.reset-text');
     if (entry.reset_text) {
-        if (resetEl) {
-            resetEl.textContent = entry.reset_text;
-        } else {
+        if (!resetEl) {
             resetEl = document.createElement('div');
             resetEl.className = 'reset-text';
-            resetEl.textContent = entry.reset_text;
             div.appendChild(resetEl);
         }
+        resetEl.textContent = entry.reset_text;
     } else if (resetEl) {
         resetEl.remove();
     }
