@@ -304,11 +304,16 @@ def time_until(iso_str: str, clock_24h: bool | None = None) -> str:
         reset = datetime.fromisoformat(iso_str)
         now = datetime.now(timezone.utc)
         diff = reset - now
+        total_seconds = diff.total_seconds()
 
-        total_min = max(0, int(diff.total_seconds() / 60))
-        if total_min == 0:
-            return ''
+        # Within the last minute before the reset (or the first moments after,
+        # while the server-side reset propagates), show an imminent marker
+        # instead of hiding the line - mirrors the native UI. Clearly-stale
+        # timestamps (far in the past) still collapse to empty so we do not lie.
+        if total_seconds < 60:
+            return T['resets_imminent'] if total_seconds > -60 else ''
 
+        total_min = int(total_seconds / 60)
         reset_local = reset.astimezone()
         today = datetime.now().date()
         if reset_local.second >= 30:

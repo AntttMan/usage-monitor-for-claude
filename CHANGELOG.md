@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Usage now refreshes right after a session limit resets instead of up to a few minutes late - the poll that confirms the reset is timed to land just after it, so the tray icon and popup stop showing the old, exhausted state
+- The reset time no longer vanishes from the popup during the last minute before a reset - it now shows a "Reset imminent" note (matching Claude's own usage screen) instead of leaving the line blank
+
 [Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.17.0...HEAD)
 
 ## [1.17.0] - 2026-06-27

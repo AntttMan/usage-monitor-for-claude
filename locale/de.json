@@ -21,6 +21,7 @@
     "resets_in": "Zurücksetzung in {duration} ({clock})",
     "resets_tomorrow": "Zurücksetzung morgen, {clock}",
     "resets_weekday": "Zurücksetzung am {day}, {clock}",
+    "resets_imminent": "Zurücksetzung steht bevor",
     "duration_hm": "{h} Std. {m} Min.",
     "duration_m": "{m} Min.",
     "duration_s": "{s}s",

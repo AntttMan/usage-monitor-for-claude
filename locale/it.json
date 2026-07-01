@@ -21,6 +21,7 @@
     "resets_in": "Si ripristina tra {duration} ({clock})",
     "resets_tomorrow": "Si ripristina domani, {clock}",
     "resets_weekday": "Si ripristina {day}, {clock}",
+    "resets_imminent": "Ripristino imminente",
     "duration_hm": "{h} h {m} min",
     "duration_m": "{m} min",
     "duration_s": "{s}s",

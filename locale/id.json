@@ -21,6 +21,7 @@
     "resets_in": "Reset dalam {duration} ({clock})",
     "resets_tomorrow": "Reset besok, {clock}",
     "resets_weekday": "Reset {day}, {clock}",
+    "resets_imminent": "Segera direset",
     "duration_hm": "{h} jam {m} mnt",
     "duration_m": "{m} mnt",
     "duration_s": "{s}d",

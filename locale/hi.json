@@ -21,6 +21,7 @@
     "resets_in": "{duration} में रीसेट ({clock})",
     "resets_tomorrow": "कल रीसेट, {clock}",
     "resets_weekday": "{day} को रीसेट, {clock}",
+    "resets_imminent": "रीसेट होने वाला है",
     "duration_hm": "{h} घं {m} मि",
     "duration_m": "{m} मि",
     "duration_s": "{s}s",

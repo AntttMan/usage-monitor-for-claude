@@ -21,6 +21,7 @@
     "resets_in": "Скидання через {duration} ({clock})",
     "resets_tomorrow": "Скидання завтра, {clock}",
     "resets_weekday": "Скидання в {day}, {clock}",
+    "resets_imminent": "Скидання незабаром",
     "duration_hm": "{h} год {m} хв",
     "duration_m": "{m} хв",
     "duration_s": "{s}с",

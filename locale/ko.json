@@ -21,6 +21,7 @@
     "resets_in": "{duration} 후 재설정 ({clock})",
     "resets_tomorrow": "내일 재설정, {clock}",
     "resets_weekday": "{day}에 재설정, {clock}",
+    "resets_imminent": "곧 재설정됨",
     "duration_hm": "{h}시간 {m}분",
     "duration_m": "{m}분",
     "duration_s": "{s}초",

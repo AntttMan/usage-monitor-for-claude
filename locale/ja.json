@@ -21,6 +21,7 @@
     "resets_in": "{duration}後にリセット ({clock})",
     "resets_tomorrow": "明日リセット、{clock}",
     "resets_weekday": "{day}にリセット、{clock}",
+    "resets_imminent": "まもなくリセット",
     "duration_hm": "{h}時間{m}分",
     "duration_m": "{m}分",
     "duration_s": "{s}秒",

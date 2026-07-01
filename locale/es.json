@@ -21,6 +21,7 @@
     "resets_in": "Se restablece en {duration} ({clock})",
     "resets_tomorrow": "Se restablece mañana, {clock}",
     "resets_weekday": "Se restablece el {day}, {clock}",
+    "resets_imminent": "Restablecimiento inminente",
     "duration_hm": "{h} h {m} min",
     "duration_m": "{m} min",
     "duration_s": "{s}s",

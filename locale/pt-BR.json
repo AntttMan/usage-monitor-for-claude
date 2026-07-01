@@ -21,6 +21,7 @@
     "resets_in": "Reinicia em {duration} ({clock})",
     "resets_tomorrow": "Reinicia amanhã, {clock}",
     "resets_weekday": "Reinicia {day}, {clock}",
+    "resets_imminent": "Reinício iminente",
     "duration_hm": "{h} h {m} min",
     "duration_m": "{m} min",
     "duration_s": "{s}s",

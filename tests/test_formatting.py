@@ -586,6 +586,30 @@ class TestTimeUntil(unittest.TestCase):
             datetime(2025, 1, 15, 12, 1, 0), timedelta(minutes=1))
         self.assertEqual(time_until('ignored'), 'Resets in 1m (12:01)')
 
+    def test_imminent_last_minute(self, mock_dt):
+        """Under a minute before the reset shows the imminent marker, not empty."""
+        utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 12, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 12, 0, 30), timedelta(seconds=30))
+        self.assertEqual(time_until('ignored'), 'Reset imminent')
+
+    def test_imminent_just_after_reset(self, mock_dt):
+        """Just past the reset (server not caught up yet) still shows the marker."""
+        utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 12, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 11, 59, 30), timedelta(seconds=-30))
+        self.assertEqual(time_until('ignored'), 'Reset imminent')
+
+    def test_long_past_reset_returns_empty(self, mock_dt):
+        """A clearly stale (long-past) reset time collapses to empty."""
+        utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 12, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 11, 58, 0), timedelta(seconds=-120))
+        self.assertEqual(time_until('ignored'), '')
+
     def test_tomorrow(self, mock_dt):
         """Reset tomorrow."""
         utc_now = datetime(2025, 1, 15, 22, 0, 0, tzinfo=timezone.utc)
@@ -627,13 +651,13 @@ class TestTimeUntil(unittest.TestCase):
             datetime(2025, 1, 15, 12, 30, 30), timedelta(hours=2, minutes=30, seconds=30))
         self.assertIn('12:31', time_until('ignored'))
 
-    def test_less_than_60_seconds_returns_empty(self, mock_dt):
-        """Less than 60 seconds remaining rounds to 0 minutes, returns empty."""
+    def test_less_than_60_seconds_shows_imminent(self, mock_dt):
+        """Under a minute before the reset shows the imminent marker instead of empty."""
         utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
         local_now = datetime(2025, 1, 15, 12, 0, 0)
         self._setup(mock_dt, utc_now, local_now,
             datetime(2025, 1, 15, 12, 0, 59), timedelta(seconds=59))
-        self.assertEqual(time_until('ignored'), '')
+        self.assertEqual(time_until('ignored'), 'Reset imminent')
 
     def test_exactly_60_seconds_shows_one_minute(self, mock_dt):
         """Exactly 60 seconds remaining rounds to 1 minute, shown."""

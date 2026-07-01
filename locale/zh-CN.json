@@ -21,6 +21,7 @@
     "resets_in": "{duration}后重置 ({clock})",
     "resets_tomorrow": "明天重置，{clock}",
     "resets_weekday": "{day}重置，{clock}",
+    "resets_imminent": "即将重置",
     "duration_hm": "{h}小时{m}分钟",
     "duration_m": "{m}分钟",
     "duration_s": "{s}秒",
