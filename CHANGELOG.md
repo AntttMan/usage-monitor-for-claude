@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.18.0...HEAD)
+
+## [1.18.0] - 2026-07-02
+
 ### Added
 
 - Per-model weekly limits (for example a Fable limit) now appear as their own usage bar, tooltip entry, and alert - Claude's newer usage data reports model-scoped limits in a format the app did not read before, so such a limit would otherwise stay invisible until it blocked you
@@ -17,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Usage now refreshes right after a session limit resets instead of up to a few minutes late - the poll that confirms the reset is timed to land just after it, so the tray icon and popup stop showing the old, exhausted state
 - The reset time no longer vanishes from the popup during the last minute before a reset - it now shows a "Reset imminent" note (matching Claude's own usage screen) instead of leaving the line blank
 
-[Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.17.0...HEAD)
+[Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.17.0...v1.18.0)
 
 ## [1.17.0] - 2026-06-27
 
