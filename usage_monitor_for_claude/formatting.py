@@ -28,6 +28,10 @@ _NUMBER_WORDS = {
 }
 _UNIT_SUFFIXES = {'hour': 'h', 'day': 'd'}
 _TITLE_CASE_EXCEPTIONS = {'oauth': 'OAuth', 'api': 'API', 'ai': 'AI'}
+_CURRENCY_SYMBOLS = {
+    'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CNY': '¥',
+    'INR': '₹', 'KRW': '₩', 'BRL': 'R$', 'CAD': 'CA$', 'AUD': 'A$', 'CHF': 'CHF',
+}
 
 
 def parse_field_name(field: str) -> tuple[int, str, str | None] | None:
@@ -339,31 +343,61 @@ def time_until(iso_str: str, clock_24h: bool | None = None) -> str:
         return ''
 
 
-def format_credits(cents: float) -> str:
-    """Format a cent amount as a localized currency string.
+def _target_currency_symbol(currency: str | None) -> str:
+    """Return the symbol to display for a currency amount.
 
-    Uses the system locale for formatting (decimal separator, symbol placement,
-    grouping).  If the user overrides ``currency_symbol`` in settings, the
-    system symbol is replaced in the formatted output.
+    Precedence: an explicit ``currency_symbol`` user override, then the
+    billing currency reported by the API (its known symbol, or the ISO code
+    itself as a fallback), then the system locale symbol.
 
     Parameters
     ----------
-    cents : float
-        Amount in cents (e.g. 420.0 for 4.20 in the base currency unit).
+    currency : str or None
+        ISO 4217 currency code from the API (e.g. ``'EUR'``), or None.
     """
-    amount = cents / 100
+    if CURRENCY_SYMBOL != _SYSTEM_CURRENCY_SYMBOL:
+        return CURRENCY_SYMBOL
+
+    if currency:
+        return _CURRENCY_SYMBOLS.get(currency.upper(), currency.upper())
+
+    return CURRENCY_SYMBOL
+
+
+def format_credits(minor_units: float, currency: str | None = None, decimal_places: int | None = None) -> str:
+    """Format a minor-unit amount as a localized currency string.
+
+    Uses the system locale for number formatting (decimal separator, symbol
+    placement, grouping).  The displayed symbol follows the billing currency
+    reported by the API when it differs from the system locale, so an account
+    billed in a currency other than the system's still shows correctly.
+
+    Parameters
+    ----------
+    minor_units : float
+        Amount in the currency's minor units (e.g. 420.0 for 4.20 at two
+        decimal places).
+    currency : str or None
+        ISO 4217 currency code from the API (e.g. ``'EUR'``).
+    decimal_places : int or None
+        Number of minor-unit decimal places reported by the API; defaults to
+        two when not provided.
+    """
+    places = decimal_places if decimal_places is not None else 2
+    amount = minor_units / (10 ** places)
+    symbol = _target_currency_symbol(currency)
 
     try:
         formatted = _locale.currency(amount, grouping=True)
 
-        if CURRENCY_SYMBOL != _SYSTEM_CURRENCY_SYMBOL and _SYSTEM_CURRENCY_SYMBOL:
-            formatted = formatted.replace(_SYSTEM_CURRENCY_SYMBOL, CURRENCY_SYMBOL)
+        if symbol and symbol != _SYSTEM_CURRENCY_SYMBOL and _SYSTEM_CURRENCY_SYMBOL:
+            formatted = formatted.replace(_SYSTEM_CURRENCY_SYMBOL, symbol)
 
         return formatted
     except (ValueError, _locale.Error):
-        if CURRENCY_SYMBOL:
-            return f'{CURRENCY_SYMBOL}\u00a0{amount:.2f}'
-        return f'{amount:.2f}'
+        if symbol:
+            return f'{symbol}\u00a0{amount:.{places}f}'
+        return f'{amount:.{places}f}'
 
 
 def format_tooltip(data: dict[str, Any]) -> str:

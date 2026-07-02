@@ -21,6 +21,7 @@ Prioritize readability and auditability - users handle credentials and must be a
 - A quota field is any dict entry with `utilization` and `resets_at` keys; `extra_usage` has a separate structure and is handled independently
 - Quota fields can be `null` in the API response (e.g. when a quota type is not enabled for the account) - always use `(data.get('key') or {})` instead of `data.get('key', {})` when chaining `.get()` calls, because the latter returns `None` when the key exists with a `null` value
 - Labels, periods, and sort order are derived from the field name via `parse_field_name()` - no per-field mapping tables
+- Model-scoped limits (e.g. a weekly Fable limit) arrive only inside the `limits` array via `scope.model`, not as top-level fields - `_merge_scoped_limits()` in `api.py` normalizes each into a synthetic top-level field (e.g. `seven_day_fable`) so all of the above applies unchanged. The period prefix is derived from the same-`group` non-scoped limit's shared `resets_at` (never hardcoded); an existing top-level field is never overwritten, and inactive scoped limits (no `resets_at`) are still surfaced at 0%
 - Locale files use template keys (`session_label`, `weekly_label`, `notify_threshold_generic`) - never add per-field translation keys
 
 ## Security & Transparency

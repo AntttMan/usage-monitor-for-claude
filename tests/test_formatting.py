@@ -929,6 +929,42 @@ class TestFormatCredits(unittest.TestCase):
         """Zero cents formats correctly."""
         self.assertEqual(format_credits(0.0), '$0.00')
 
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', return_value='$10.00')
+    def test_api_currency_overrides_system_symbol(self, mock_currency):
+        """The API billing currency replaces the system symbol when they differ."""
+        self.assertEqual(format_credits(1000.0, 'EUR'), '€10.00')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '€')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', 'CHF')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', return_value='10,00 €')
+    def test_user_override_wins_over_api_currency(self, mock_currency):
+        """An explicit currency_symbol override takes precedence over the API currency."""
+        self.assertEqual(format_credits(1000.0, 'USD'), '10,00 CHF')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', side_effect=ValueError)
+    def test_decimal_places_zero_divides_by_one(self, mock_currency):
+        """decimal_places=0 treats the amount as whole units (no /100)."""
+        self.assertEqual(format_credits(1000.0, 'JPY', 0), '¥ 1000')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', side_effect=ValueError)
+    def test_unknown_currency_uses_iso_code(self, mock_currency):
+        """An unmapped currency code is shown verbatim as the symbol."""
+        self.assertEqual(format_credits(500.0, 'XYZ'), 'XYZ 5.00')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', return_value='$1.00')
+    def test_decimal_places_scales_amount(self, mock_currency):
+        """decimal_places controls the minor-unit divisor passed to locale.currency."""
+        format_credits(1000.0, 'USD', 3)
+        mock_currency.assert_called_once_with(1.0, grouping=True)
+
 
 if __name__ == '__main__':
     unittest.main()

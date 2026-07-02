@@ -12,7 +12,9 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from usage_monitor_for_claude.api import API_URL_USAGE, _extract_server_message, _parse_retry_after, fetch_usage, read_access_token
+from usage_monitor_for_claude.api import (
+    API_URL_USAGE, _extract_server_message, _merge_scoped_limits, _model_slug, _parse_retry_after, fetch_usage, read_access_token,
+)
 from usage_monitor_for_claude.i18n import LOCALE_DIR
 
 EN = json.loads((LOCALE_DIR / 'en.json').read_text(encoding='utf-8'))
@@ -415,6 +417,105 @@ class TestParseRetryAfter(unittest.TestCase):
         resp = MagicMock()
         resp.headers = {'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT'}
         self.assertIsNone(_parse_retry_after(resp))
+
+
+# ---------------------------------------------------------------------------
+# _merge_scoped_limits
+# ---------------------------------------------------------------------------
+
+_FIVE_HOUR_RESET = '2026-07-02T10:19:59.752884+00:00'
+_SEVEN_DAY_RESET = '2026-07-09T02:59:59.752905+00:00'
+
+
+def _response_with_scoped(display_name, percent, resets_at):
+    """Build a usage response carrying one model-scoped weekly limit."""
+    return {
+        'five_hour': {'utilization': 4.0, 'resets_at': _FIVE_HOUR_RESET},
+        'seven_day': {'utilization': 1.0, 'resets_at': _SEVEN_DAY_RESET},
+        'limits': [
+            {'kind': 'session', 'group': 'session', 'percent': 4, 'resets_at': _FIVE_HOUR_RESET, 'scope': None},
+            {'kind': 'weekly_all', 'group': 'weekly', 'percent': 1, 'resets_at': _SEVEN_DAY_RESET, 'scope': None},
+            {'kind': 'weekly_scoped', 'group': 'weekly', 'percent': percent, 'resets_at': resets_at,
+             'scope': {'model': {'id': None, 'display_name': display_name}, 'surface': None}},
+        ],
+    }
+
+
+class TestMergeScopedLimits(unittest.TestCase):
+    """Tests for _merge_scoped_limits()."""
+
+    def test_no_limits_key_passthrough(self):
+        """A response without a 'limits' array is returned unchanged."""
+        data = {'five_hour': {'utilization': 42.0}}
+        self.assertEqual(_merge_scoped_limits(data), {'five_hour': {'utilization': 42.0}})
+
+    def test_limits_not_a_list_passthrough(self):
+        """A non-list 'limits' value is ignored."""
+        data = {'seven_day': {'utilization': 1.0}, 'limits': None}
+        self.assertEqual(_merge_scoped_limits(data), data)
+
+    def test_active_scoped_limit_becomes_field(self):
+        """An active model-scoped weekly limit becomes a synthetic quota field."""
+        result = _merge_scoped_limits(_response_with_scoped('Fable', 30, _SEVEN_DAY_RESET))
+        self.assertEqual(result['seven_day_fable'], {'utilization': 30.0, 'resets_at': _SEVEN_DAY_RESET})
+
+    def test_percent_is_float(self):
+        """The integer 'percent' is exposed as a float 'utilization'."""
+        result = _merge_scoped_limits(_response_with_scoped('Fable', 30, _SEVEN_DAY_RESET))
+        self.assertIsInstance(result['seven_day_fable']['utilization'], float)
+
+    def test_inactive_scoped_limit_still_exposed(self):
+        """A scoped limit without a reset window is exposed at 0% with resets_at None."""
+        result = _merge_scoped_limits(_response_with_scoped('Fable', 0, None))
+        self.assertEqual(result['seven_day_fable'], {'utilization': 0.0, 'resets_at': None})
+
+    def test_existing_top_level_field_not_overwritten(self):
+        """A top-level field wins over a scoped limit for the same model."""
+        data = _response_with_scoped('Sonnet', 50, _SEVEN_DAY_RESET)
+        data['seven_day_sonnet'] = {'utilization': 55.0, 'resets_at': _SEVEN_DAY_RESET}
+        result = _merge_scoped_limits(data)
+        self.assertEqual(result['seven_day_sonnet']['utilization'], 55.0)
+
+    def test_scoped_without_base_group_skipped(self):
+        """Without a non-scoped limit of the same group, no prefix can be derived."""
+        data = {
+            'five_hour': {'utilization': 4.0, 'resets_at': _FIVE_HOUR_RESET},
+            'seven_day': {'utilization': 1.0, 'resets_at': _SEVEN_DAY_RESET},
+            'limits': [
+                {'kind': 'weekly_scoped', 'group': 'weekly', 'percent': 30, 'resets_at': _SEVEN_DAY_RESET,
+                 'scope': {'model': {'display_name': 'Fable'}}},
+            ],
+        }
+        self.assertNotIn('seven_day_fable', _merge_scoped_limits(data))
+
+    def test_input_not_mutated(self):
+        """The original response dict is not mutated in place."""
+        data = _response_with_scoped('Fable', 30, _SEVEN_DAY_RESET)
+        _merge_scoped_limits(data)
+        self.assertNotIn('seven_day_fable', data)
+
+    def test_original_fields_preserved(self):
+        """Existing top-level quota fields survive the merge unchanged."""
+        result = _merge_scoped_limits(_response_with_scoped('Fable', 30, _SEVEN_DAY_RESET))
+        self.assertEqual(result['five_hour']['utilization'], 4.0)
+        self.assertEqual(result['seven_day']['utilization'], 1.0)
+
+
+# ---------------------------------------------------------------------------
+# _model_slug
+# ---------------------------------------------------------------------------
+
+class TestModelSlug(unittest.TestCase):
+    """Tests for _model_slug()."""
+
+    def test_single_word(self):
+        self.assertEqual(_model_slug('Fable'), 'fable')
+
+    def test_multi_word(self):
+        self.assertEqual(_model_slug('Claude Sonnet'), 'claude_sonnet')
+
+    def test_digits_and_punctuation(self):
+        self.assertEqual(_model_slug('Opus 4.5'), 'opus_4_5')
 
 
 if __name__ == '__main__':

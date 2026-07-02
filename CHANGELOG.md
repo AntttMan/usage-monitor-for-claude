@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-model weekly limits (for example a Fable limit) now appear as their own usage bar, tooltip entry, and alert - Claude's newer usage data reports model-scoped limits in a format the app did not read before, so such a limit would otherwise stay invisible until it blocked you
+- Extra usage amounts now show in the account's actual billing currency and precision - Claude's usage data now reports the currency and decimal places, so the amount no longer guesses the symbol from the Windows locale and stays correct even when the billing currency differs from the system's
+
 ### Fixed
 
 - Usage now refreshes right after a session limit resets instead of up to a few minutes late - the poll that confirms the reset is timed to land just after it, so the tray icon and popup stop showing the old, exhausted state

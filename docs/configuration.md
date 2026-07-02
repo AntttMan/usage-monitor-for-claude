@@ -187,11 +187,11 @@ By default, reset times follow your Windows clock format (the 24-hour or 12-hour
 
 ## Currency
 
-The Anthropic API does not include currency information, so the app detects the currency symbol from your Windows locale settings. If your Windows locale currency differs from the currency Anthropic bills you in, you can override just the symbol here. Number formatting (decimal separator, symbol position) always follows your system locale.
+The app shows extra usage amounts in the billing currency the Anthropic API reports for your account (its symbol and decimal precision), falling back to your Windows locale's currency symbol when the API does not report one. If you want a different symbol, override it here - your override always wins. Number formatting (decimal separator, symbol position) always follows your system locale.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `currency_symbol` | *(auto-detected)* | Override the auto-detected currency symbol (e.g., `"$"`, `"€"`, `"¥"`) |
+| `currency_symbol` | *(from API, else locale)* | Override the displayed currency symbol (e.g., `"$"`, `"€"`, `"¥"`) |
 
 ## Tray icon colors
 

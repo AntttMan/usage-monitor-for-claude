@@ -426,7 +426,7 @@ class TestExtraUsageAlerts(unittest.TestCase):
 
     def test_notification_includes_credit_amounts(self):
         """Notification message includes formatted credit amounts."""
-        with patch('usage_monitor_for_claude.app.format_credits', side_effect=lambda c: f'${c / 100:.2f}'):
+        with patch('usage_monitor_for_claude.app.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}'):
             self.app._check_extra_usage_alerts(self._extra_data(used=820, limit=1000))
 
         args = self.app.icon.notify.call_args[0]

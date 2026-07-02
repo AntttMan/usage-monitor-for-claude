@@ -489,13 +489,17 @@ class UsageMonitorForClaude:
 
         if highest_exceeded > last_notified:
             title = T['notify_threshold_title']
+            currency = extra.get('currency')
+            decimal_places = extra.get('decimal_places')
+            used_text = format_credits(used, currency, decimal_places)
+            limit_text = format_credits(limit, currency, decimal_places)
             message = T['notify_threshold_extra_usage'].format(
-                pct=f'{pct:.0f}', used=format_credits(used), limit=format_credits(limit),
+                pct=f'{pct:.0f}', used=used_text, limit=limit_text,
             )
             self._notify_or_defer('threshold_extra_usage', message, title)
             self._run_threshold_command(
                 'extra_usage', pct, highest_exceeded, extra, title, message,
-                extra_used=format_credits(used), extra_limit=format_credits(limit),
+                extra_used=used_text, extra_limit=limit_text,
             )
             self._notified_thresholds['extra_usage'] = highest_exceeded
         elif highest_exceeded < last_notified:
@@ -526,8 +530,10 @@ class UsageMonitorForClaude:
         if extra.get('is_enabled'):
             limit = extra.get('monthly_limit', 0) or 0
             used = extra.get('used_credits', 0) or 0
-            env_vars['USAGE_MONITOR_EXTRA_USED'] = format_credits(used)
-            env_vars['USAGE_MONITOR_EXTRA_LIMIT'] = format_credits(limit)
+            currency = extra.get('currency')
+            decimal_places = extra.get('decimal_places')
+            env_vars['USAGE_MONITOR_EXTRA_USED'] = format_credits(used, currency, decimal_places)
+            env_vars['USAGE_MONITOR_EXTRA_LIMIT'] = format_credits(limit, currency, decimal_places)
 
         run_event_command(ON_STARTUP_COMMAND, env_vars)
 

@@ -124,11 +124,14 @@ def _snapshot_to_dict(
             if limit > 0:
                 used = extra_data.get('used_credits', 0) or 0
                 pct = used / limit * 100
+                currency = extra_data.get('currency')
+                decimal_places = extra_data.get('decimal_places')
                 extra = {
                     'pct_text': f'{pct:.0f}%',
                     'fill_pct': max(0.0, min(1.0, pct / 100)),
                     'spent_text': T['extra_usage_spent'].format(
-                        used=format_credits(used), limit=format_credits(limit),
+                        used=format_credits(used, currency, decimal_places),
+                        limit=format_credits(limit, currency, decimal_places),
                     ),
                 }
 

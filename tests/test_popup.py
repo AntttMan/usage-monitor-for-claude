@@ -221,6 +221,21 @@ class TestSnapshotToDict(unittest.TestCase):
         self.assertEqual(bar['reset_text'], '5h 0m')
         self.assertEqual(bar['dividers'], [])
 
+    def test_field_with_null_resets_at(self):
+        """An inactive scoped limit (resets_at None) renders a 0% bar with no reset text."""
+        usage = {'seven_day_fable': {'utilization': 0.0, 'resets_at': None}}
+        result = _snapshot_to_dict(_snap(usage=usage), installations=[])
+
+        self.assertEqual(len(result['usage']), 1)
+        bar = result['usage'][0]
+        self.assertEqual(bar['key'], 'seven_day_fable')
+        self.assertEqual(bar['pct_text'], '0%')
+        self.assertEqual(bar['fill_pct'], 0.0)
+        self.assertEqual(bar['reset_text'], '')
+        self.assertEqual(bar['dividers'], [])
+        self.assertIsNone(bar['marker_rel'])
+        self.assertFalse(bar['warn'])
+
     @patch('usage_monitor_for_claude.popup.elapsed_pct', return_value=30.0)
     @patch('usage_monitor_for_claude.popup.time_until', return_value='3h 30m')
     @patch('usage_monitor_for_claude.popup.divider_positions', return_value=[0.5])
@@ -374,7 +389,7 @@ class TestSnapshotToDict(unittest.TestCase):
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
         self.assertIsNone(result['extra'])
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_calculation(self, _mock_credits):
         """Extra usage computes percentage and formatted text correctly."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 10000, 'used_credits': 2500}}
@@ -387,7 +402,7 @@ class TestSnapshotToDict(unittest.TestCase):
         self.assertIn('$25.00', extra['spent_text'])
         self.assertIn('$100.00', extra['spent_text'])
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_fill_clamped(self, _mock_credits):
         """Extra usage fill is clamped to 1.0 when over limit."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 1000, 'used_credits': 2000}}
