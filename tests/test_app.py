@@ -624,6 +624,19 @@ class TestResetNotifications(unittest.TestCase):
 
     @patch('usage_monitor_for_claude.app.format_tooltip', return_value='tooltip')
     @patch('usage_monitor_for_claude.app.create_icon_image')
+    def test_simultaneous_resets_notify_once(self, _icon, _tooltip):
+        """Several quotas resetting in the same update fire a single reset notification."""
+        self.app._prev_utilization = {'seven_day': 99.0, 'seven_day_fable': 99.0}
+        data = {'seven_day': {'utilization': 10.0}, 'seven_day_fable': {'utilization': 10.0}}
+        self.app.cache = MagicMock()
+        self.app.cache.update.return_value = UpdateResult(data=data)
+
+        self.app.update()
+
+        self.app.icon.notify.assert_called_once()
+
+    @patch('usage_monitor_for_claude.app.format_tooltip', return_value='tooltip')
+    @patch('usage_monitor_for_claude.app.create_icon_image')
     def test_no_reset_notification_on_first_update(self, _icon, _tooltip):
         """No reset notification on first update (no previous values)."""
         data = {'five_hour': {'utilization': 10.0}, 'seven_day': {'utilization': 10.0}}

@@ -296,6 +296,8 @@ class UsageMonitorForClaude:
 
         # Notify when quota resets after being nearly exhausted, but only if no other quota is blocking usage.
         # While idle/locked, defer notifications until the user returns (avoids lock screen privacy concerns).
+        # The message is generic, so at most one reset notification fires per update even when several
+        # quotas reset together (e.g. the weekly total and a model-scoped weekly limit share a reset time).
         for key, pct in quota_fields.items():
             prev = self._prev_utilization.get(key)
             if prev is None:
@@ -311,6 +313,7 @@ class UsageMonitorForClaude:
 
             if prev > reset_threshold and pct < prev and not any_blocking:
                 self._notify_or_defer('reset', T['notify_reset'], T['notify_reset_title'])
+                break
 
         # Run reset command on any detected usage drop (independent of notification threshold)
         for key, pct in quota_fields.items():

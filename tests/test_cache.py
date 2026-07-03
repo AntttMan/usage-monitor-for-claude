@@ -14,6 +14,14 @@ from usage_monitor_for_claude.cache import CacheSnapshot, UpdateResult, UsageCac
 from usage_monitor_for_claude.claude_cli import RefreshResult
 
 _SUCCESS_DATA = {'five_hour': {'utilization': 42.0}}
+_SCOPED_LIMIT_DATA = {
+    'five_hour': {'utilization': 17.0, 'resets_at': 'x'},
+    'seven_day': {'utilization': 75.0, 'resets_at': 'x'},
+    'limits': [
+        {'kind': 'weekly_scoped', 'group': 'weekly', 'percent': 94, 'resets_at': 'x',
+         'scope': {'model': {'id': None, 'display_name': 'Fable'}, 'surface': None}},
+    ],
+}
 _ERROR_DATA = {'error': 'server down'}
 _AUTH_ERROR_DATA = {'error': 'expired', 'auth_error': True}
 _SERVER_MSG_DATA = {'error': 'HTTP 429', 'server_message': 'Rate limited.'}
@@ -145,6 +153,15 @@ class TestSuccessState(unittest.TestCase):
         cache = _make_cache()
         cache.update()
         self.assertEqual(cache.usage, _SUCCESS_DATA)
+
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_SCOPED_LIMIT_DATA)
+    def test_success_promotes_scoped_limits(self, _mock):
+        """Model-scoped limits from the API 'limits' array become quota fields."""
+        cache = _make_cache()
+        result = cache.update()
+        self.assertEqual(cache.usage['seven_day_fable'], {'utilization': 94.0, 'resets_at': 'x'})
+        assert result.data is not None  # narrow Optional for the type-checker
+        self.assertEqual(result.data['seven_day_fable']['utilization'], 94.0)
 
     @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_SUCCESS_DATA)
     def test_success_sets_last_success_time(self, _mock):
@@ -507,6 +524,19 @@ class TestTokenRefresh(unittest.TestCase):
         self.assertEqual(cache.usage, _SUCCESS_DATA)
         self.assertIsNone(cache.last_error)
         self.assertEqual(cache.consecutive_errors, 0)
+
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_SCOPED_LIMIT_DATA)
+    @patch('usage_monitor_for_claude.cache.read_access_token', return_value='new-token')
+    @patch('usage_monitor_for_claude.cache.refresh_token')
+    def test_refresh_retry_promotes_scoped_limits(self, mock_refresh, _mock_token, _mock_fetch):
+        """The token-refresh retry path also promotes model-scoped limits."""
+        mock_refresh.return_value = RefreshResult(success=True, updated=False, old_version='2.1.69', new_version='2.1.69', error='')
+        cache = _make_cache()
+
+        result = cache._try_token_refresh('old-token')
+
+        assert result is not None
+        self.assertEqual(cache.usage['seven_day_fable'], {'utilization': 94.0, 'resets_at': 'x'})
 
     @patch('usage_monitor_for_claude.cache.read_access_token', return_value='same-token')
     @patch('usage_monitor_for_claude.cache.refresh_token')

@@ -16,11 +16,15 @@ from .settings import CURRENCY_SYMBOL, TOOLTIP_FIELDS, _SYSTEM_CURRENCY_SYMBOL
 
 __all__ = [
     'divider_positions', 'elapsed_pct', 'expand_popup_fields', 'field_period', 'format_credits',
-    'format_tooltip', 'parse_field_name', 'popup_label', 'time_until', 'tooltip_label',
+    'format_tooltip', 'merge_scoped_limits', 'parse_field_name', 'popup_label', 'time_until', 'tooltip_label',
 ]
 
 PERIOD_5H = 5 * 3600
 PERIOD_7D = 7 * 24 * 3600
+
+# Maps a scoped-limit period group to the flat field prefix that encodes the
+# same period, so a synthesized field name parses via parse_field_name().
+_SCOPED_LIMIT_PERIOD_PREFIX = {'session': 'five_hour', 'weekly': 'seven_day'}
 
 _NUMBER_WORDS = {
     'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6,
@@ -184,6 +188,66 @@ def expand_popup_fields(popup_fields: list[str], usage_data: dict[str, Any]) -> 
         elif field in available and field not in seen:
             seen.add(field)
             result.append(field)
+
+    return result
+
+
+def merge_scoped_limits(usage_data: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of the usage response with model-scoped limits promoted to top-level fields.
+
+    The Anthropic usage API reports per-model quota limits (e.g. the weekly
+    limit for a specific model such as Fable) inside a ``limits`` array rather
+    than as flat ``seven_day_<model>`` fields.  Each scoped entry is promoted to
+    a synthetic top-level field named ``<period>_<model>`` (e.g.
+    ``seven_day_fable``) carrying the ``utilization`` and ``resets_at`` shape the
+    rest of the app expects, so scoped limits flow through the same
+    auto-detection used for the flat quota fields.  Aggregate entries (no
+    ``scope``) are ignored because the ``five_hour`` and ``seven_day`` fields
+    already represent them.
+
+    Parameters
+    ----------
+    usage_data : dict
+        Raw API response dict.
+
+    Returns
+    -------
+    dict
+        Shallow copy of *usage_data* with any synthesized scoped fields added.
+        A field already present with a non-null value is never overwritten;
+        entries with an unrecognized period group, a non-numeric percentage, or
+        an empty model name are skipped.
+    """
+    limits = usage_data.get('limits')
+    if not isinstance(limits, list):
+        return usage_data
+
+    result = dict(usage_data)
+
+    for entry in limits:
+        if not isinstance(entry, dict):
+            continue
+
+        scope = entry.get('scope')
+        model = scope.get('model') if isinstance(scope, dict) else None
+        display_name = model.get('display_name') if isinstance(model, dict) else None
+        if not display_name:
+            continue
+
+        group = entry.get('group')
+        prefix = _SCOPED_LIMIT_PERIOD_PREFIX.get(group) if isinstance(group, str) else None
+        percent = entry.get('percent')
+        resets_at = entry.get('resets_at')
+        if prefix is None or not resets_at or isinstance(percent, bool) or not isinstance(percent, (int, float)):
+            continue
+
+        variant = display_name.strip().lower().replace(' ', '_')
+        if not variant:
+            continue
+
+        field = f'{prefix}_{variant}'
+        if not result.get(field):
+            result[field] = {'utilization': float(percent), 'resets_at': resets_at}
 
     return result
 
