@@ -34,8 +34,8 @@ https://api.anthropic.com/api/oauth/usage
   "iguana_necktie": null,
   "extra_usage": {
     "is_enabled": true,
-    "monthly_limit": 1000,
-    "used_credits": 0.0,
+    "monthly_limit": null,
+    "used_credits": 5090.0,
     "utilization": null,
     "currency": "USD",
     "decimal_places": 2,
@@ -76,18 +76,18 @@ https://api.anthropic.com/api/oauth/usage
     }
   ],
   "spend": {
-    "enabled": false,
-    "used": 0.0,
+    "enabled": true,
+    "used": { "amount_minor": 5090, "currency": "USD", "exponent": 2 },
     "cap": null,
     "limit": null,
-    "balance": 0.0,
-    "percent": null,
+    "balance": { "amount_minor": 25000, "currency": "USD", "exponent": 2 },
+    "percent": 0,
     "severity": "normal",
-    "auto_reload": false,
+    "auto_reload": null,
     "can_purchase_credits": false,
     "can_toggle": false,
     "disabled_reason": null,
-    "disclaimer": null
+    "disclaimer": "Usage credits cover you when you hit your plan limits."
   },
   "member_dashboard_available": false
 }
@@ -98,6 +98,10 @@ https://api.anthropic.com/api/oauth/usage
 Per-model weekly limits (e.g. the weekly limit for a specific model such as Fable) are reported in the `limits` array as entries with `kind: "weekly_scoped"` and a non-null `scope.model.display_name`. They are **no longer** exposed as flat `seven_day_<model>` fields - those keys are now `null`. The `session` and `weekly_all` entries duplicate the top-level `five_hour` and `seven_day` fields.
 
 The app derives a synthetic top-level field for each model-scoped entry, named `<period>_<model>` (`session` -> `five_hour_<model>`, `weekly` -> `seven_day_<model>`, e.g. `seven_day_fable`), carrying `{ "utilization": <percent>, "resets_at": <resets_at> }`. This lets scoped limits flow through the same auto-detection, labeling, and alerting as the flat quota fields.
+
+### Notes on usage credits
+
+The popup's "Usage credits" section reads `extra_usage.used_credits` (spend so far), `extra_usage.monthly_limit` (`null` = unlimited, otherwise a cap), and `spend.balance` (current prepaid balance, shown when present). `extra_usage` amounts are plain numbers of minor currency units (cents for a 2-decimal currency). `spend` amounts (`used`, `balance`, and, when set, `cap`/`limit`) are money objects of the form `{ "amount_minor": <int>, "currency": <str>, "exponent": <int> }`.
 
 ## /api/oauth/profile
 

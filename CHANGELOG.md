@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The detail popup's usage-credits section (renamed from "Extra usage" to "Usage credits") now shows your monthly spend limit and current credit balance, and it appears even on an unlimited plan so your spend is always visible - previously the whole section was hidden whenever the monthly limit was unlimited
+
 ### Fixed
 
 - Per-model weekly limits (such as Fable) are now shown again - the usage API moved these limits out of the flat `seven_day_<model>` fields into a new `limits` array, so they had stopped appearing in the popup and no longer triggered threshold alerts; they are now detected from the new structure and displayed as their own usage bars like before

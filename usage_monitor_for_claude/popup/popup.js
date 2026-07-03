@@ -24,6 +24,8 @@ function init(config) {
     document.getElementById('labelPlan').textContent = translations.plan;
     document.getElementById('headingUsage').textContent = translations.usage;
     document.getElementById('headingExtraUsage').textContent = translations.extra_usage;
+    document.getElementById('creditsLimitLabel').textContent = translations.credits_monthly_limit;
+    document.getElementById('creditsBalanceLabel').textContent = translations.credits_balance;
     document.getElementById('headingClaudeCode').textContent = translations.claude_code;
 
     const changelogLink = document.getElementById('changelogLink');
@@ -44,7 +46,11 @@ function init(config) {
         extraSection: document.getElementById('extraSection'),
         extraSpent: document.getElementById('extraSpent'),
         extraPct: document.getElementById('extraPct'),
+        extraBar: document.getElementById('extraBar'),
         extraFill: document.getElementById('extraFill'),
+        creditsLimitValue: document.getElementById('creditsLimitValue'),
+        creditsBalanceRow: document.getElementById('creditsBalanceRow'),
+        creditsBalanceValue: document.getElementById('creditsBalanceValue'),
         installSection: document.getElementById('installSection'),
         installRows: document.getElementById('installRows'),
         statusSection: document.getElementById('statusSection'),
@@ -80,8 +86,18 @@ function updateData(data) {
     els.extraSection.classList.toggle('visible', hasExtra);
     if (hasExtra) {
         els.extraSpent.textContent = data.extra.spent_text;
-        els.extraPct.textContent = data.extra.pct_text;
-        els.extraFill.style.width = `${data.extra.fill_pct * 100}%`;
+        els.extraPct.textContent = data.extra.pct_text ?? '';
+
+        const hasBar = data.extra.fill_pct !== null && data.extra.fill_pct !== undefined;
+        els.extraBar.style.display = hasBar ? '' : 'none';
+        if (hasBar) {
+            els.extraFill.style.width = `${data.extra.fill_pct * 100}%`;
+        }
+
+        els.creditsLimitValue.textContent = data.extra.limit_text;
+        const hasBalance = !!data.extra.balance_text;
+        els.creditsBalanceRow.style.display = hasBalance ? '' : 'none';
+        els.creditsBalanceValue.textContent = data.extra.balance_text ?? '';
     }
 
     const hasInstalls = !!data.installations?.length;
