@@ -137,3 +137,23 @@ https://api.anthropic.com/api/oauth/profile
   }
 }
 ```
+
+## /api/oauth/organizations/{org_uuid}/prepaid/credits
+
+```
+https://api.anthropic.com/api/oauth/organizations/{org_uuid}/prepaid/credits
+```
+
+The prepaid credit balance is not present in `/api/oauth/usage` or `/api/oauth/profile` (there `spend.balance` is `null`). It lives behind the organization UUID from the profile response above. Same domain, same OAuth token, read-only. `amount` is the balance in minor currency units (cents for a 2-decimal currency); `balance_credits` is the same value in whole currency units.
+
+```json
+{
+  "amount": 25000,
+  "currency": "USD",
+  "balance_credits": 250,
+  "auto_reload_settings": null,
+  "pending_invoice_amount_cents": null,
+  "last_paid_purchase_cents": null,
+  "expiry_policy_months": null
+}
+```

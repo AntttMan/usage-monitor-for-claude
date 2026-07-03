@@ -283,6 +283,7 @@ class UsageMonitorForClaude:
             self._prev_utilization = {}
             self._notified_thresholds = {}
             self._prev_account_uuid = current_account_uuid
+            self.cache.reset_balance()
             return
         self._prev_account_uuid = current_account_uuid
 

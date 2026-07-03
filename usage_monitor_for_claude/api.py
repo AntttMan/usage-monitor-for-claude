@@ -19,11 +19,17 @@ import requests
 
 from .i18n import T
 
-__all__ = ['API_URL_USAGE', 'API_URL_PROFILE', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CREDENTIALS', 'read_access_token', 'api_headers', 'fetch_usage', 'fetch_profile']
+__all__ = [
+    'API_URL_USAGE', 'API_URL_PROFILE', 'API_URL_PREPAID_CREDITS', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CREDENTIALS',
+    'read_access_token', 'api_headers', 'fetch_usage', 'fetch_profile', 'fetch_prepaid_credits',
+]
 
 # API endpoints & credentials
 API_URL_USAGE = 'https://api.anthropic.com/api/oauth/usage'
 API_URL_PROFILE = 'https://api.anthropic.com/api/oauth/profile'
+# The prepaid credit wallet is not exposed by the usage/profile endpoints; it lives
+# behind the organization UUID (read from the profile response). Same domain, same token.
+API_URL_PREPAID_CREDITS = 'https://api.anthropic.com/api/oauth/organizations/{org_uuid}/prepaid/credits'
 CLAUDE_CONFIG_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', '')) if os.environ.get('CLAUDE_CONFIG_DIR') else Path.home() / '.claude'
 CLAUDE_CREDENTIALS = CLAUDE_CONFIG_DIR / '.credentials.json'
 _FALLBACK_USER_AGENT = 'claude-code/2.1.85'
@@ -96,6 +102,35 @@ def fetch_profile() -> dict[str, Any] | None:
 
     try:
         resp = requests.get(API_URL_PROFILE, headers=headers, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
+
+
+def fetch_prepaid_credits(org_uuid: str) -> dict[str, Any] | None:
+    """Fetch an organization's prepaid credit wallet.
+
+    The prepaid balance is not exposed by the usage or profile endpoints, so
+    it is read separately - same domain, same OAuth token, read-only GET.
+
+    Parameters
+    ----------
+    org_uuid : str
+        Organization UUID from the profile response, filling the sole
+        placeholder in ``API_URL_PREPAID_CREDITS``.
+
+    Returns
+    -------
+    dict or None
+        The raw response dict, or None on any error or missing token/UUID.
+    """
+    headers = api_headers()
+    if not headers or not org_uuid:
+        return None
+
+    try:
+        resp = requests.get(API_URL_PREPAID_CREDITS.format(org_uuid=org_uuid), headers=headers, timeout=10)
         resp.raise_for_status()
         return resp.json()
     except Exception:
