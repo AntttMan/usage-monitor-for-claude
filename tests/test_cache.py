@@ -10,10 +10,19 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from usage_monitor_for_claude.cache import CacheSnapshot, UpdateResult, UsageCache
+from usage_monitor_for_claude.cache import _BALANCE_REFRESH_INTERVAL, CacheSnapshot, UpdateResult, UsageCache
 from usage_monitor_for_claude.claude_cli import RefreshResult
 
 _SUCCESS_DATA = {'five_hour': {'utilization': 42.0}}
+_CREDITS_ENABLED_DATA = {'five_hour': {'utilization': 42.0}, 'extra_usage': {'is_enabled': True}}
+_SCOPED_LIMIT_DATA = {
+    'five_hour': {'utilization': 17.0, 'resets_at': 'x'},
+    'seven_day': {'utilization': 75.0, 'resets_at': 'x'},
+    'limits': [
+        {'kind': 'weekly_scoped', 'group': 'weekly', 'percent': 94, 'resets_at': 'x',
+         'scope': {'model': {'id': None, 'display_name': 'Fable'}, 'surface': None}},
+    ],
+}
 _ERROR_DATA = {'error': 'server down'}
 _AUTH_ERROR_DATA = {'error': 'expired', 'auth_error': True}
 _SERVER_MSG_DATA = {'error': 'HTTP 429', 'server_message': 'Rate limited.'}
@@ -145,6 +154,15 @@ class TestSuccessState(unittest.TestCase):
         cache = _make_cache()
         cache.update()
         self.assertEqual(cache.usage, _SUCCESS_DATA)
+
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_SCOPED_LIMIT_DATA)
+    def test_success_promotes_scoped_limits(self, _mock):
+        """Model-scoped limits from the API 'limits' array become quota fields."""
+        cache = _make_cache()
+        result = cache.update()
+        self.assertEqual(cache.usage['seven_day_fable'], {'utilization': 94.0, 'resets_at': 'x'})
+        assert result.data is not None  # narrow Optional for the type-checker
+        self.assertEqual(result.data['seven_day_fable']['utilization'], 94.0)
 
     @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_SUCCESS_DATA)
     def test_success_sets_last_success_time(self, _mock):
@@ -507,6 +525,19 @@ class TestTokenRefresh(unittest.TestCase):
         self.assertEqual(cache.usage, _SUCCESS_DATA)
         self.assertIsNone(cache.last_error)
         self.assertEqual(cache.consecutive_errors, 0)
+
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_SCOPED_LIMIT_DATA)
+    @patch('usage_monitor_for_claude.cache.read_access_token', return_value='new-token')
+    @patch('usage_monitor_for_claude.cache.refresh_token')
+    def test_refresh_retry_promotes_scoped_limits(self, mock_refresh, _mock_token, _mock_fetch):
+        """The token-refresh retry path also promotes model-scoped limits."""
+        mock_refresh.return_value = RefreshResult(success=True, updated=False, old_version='2.1.69', new_version='2.1.69', error='')
+        cache = _make_cache()
+
+        result = cache._try_token_refresh('old-token')
+
+        assert result is not None
+        self.assertEqual(cache.usage['seven_day_fable'], {'utilization': 94.0, 'resets_at': 'x'})
 
     @patch('usage_monitor_for_claude.cache.read_access_token', return_value='same-token')
     @patch('usage_monitor_for_claude.cache.refresh_token')
@@ -882,6 +913,173 @@ class TestEnsureProfileTokenChange(unittest.TestCase):
         # Third call: same token-b, should not re-fetch
         cache.ensure_profile()
         mock_profile.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# prepaid balance
+# ---------------------------------------------------------------------------
+
+class TestPrepaidBalance(unittest.TestCase):
+    """Tests for prepaid balance injection into the usage data."""
+
+    _PROFILE = {'organization': {'uuid': 'org-xyz'}}
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': 25000})
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_CREDITS_ENABLED_DATA)
+    def test_balance_injected_into_usage(self, _mock_usage, mock_credits):
+        """A fetched balance is written into spend.balance for the popup."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache.update()
+
+        self.assertEqual(cache.usage['spend']['balance'], 25000)
+        mock_credits.assert_called_once_with('org-xyz')
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': 25000})
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_CREDITS_ENABLED_DATA)
+    def test_input_usage_not_mutated(self, _mock_usage, _mock_credits):
+        """Injecting the balance does not mutate the shared fetched dict."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache.update()
+
+        self.assertNotIn('spend', _CREDITS_ENABLED_DATA)
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits')
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_CREDITS_ENABLED_DATA)
+    def test_no_balance_fetch_without_profile(self, _mock_usage, mock_credits):
+        """With no profile (no org UUID), the balance endpoint is never called."""
+        cache = _make_cache()
+
+        cache.update()
+
+        mock_credits.assert_not_called()
+        self.assertIsNone((cache.usage.get('spend') or {}).get('balance'))
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits')
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_SUCCESS_DATA)
+    def test_no_balance_fetch_when_credits_disabled(self, _mock_usage, mock_credits):
+        """With credits not enabled in the usage data, the balance is not fetched."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache.update()
+
+        mock_credits.assert_not_called()
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value=None)
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_CREDITS_ENABLED_DATA)
+    def test_last_balance_retained_on_failure(self, _mock_usage, _mock_credits):
+        """A failed balance fetch keeps the last-known value instead of dropping it."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+        cache._balance_cents = 9900
+
+        cache.update()
+
+        self.assertEqual(cache.usage['spend']['balance'], 9900)
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': 'n/a'})
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_CREDITS_ENABLED_DATA)
+    def test_non_numeric_amount_ignored(self, _mock_usage, _mock_credits):
+        """A non-numeric amount is ignored (no balance shown)."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache.update()
+
+        self.assertIsNone((cache.usage.get('spend') or {}).get('balance'))
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': 25000})
+    @patch('usage_monitor_for_claude.cache.fetch_usage',
+           return_value={'five_hour': {'utilization': 42.0}, 'extra_usage': {'is_enabled': True},
+                         'spend': {'enabled': True, 'balance': None}})
+    def test_balance_preserves_existing_spend_fields(self, _mock_usage, _mock_credits):
+        """Injecting balance keeps other spend fields intact."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache.update()
+
+        self.assertEqual(cache.usage['spend']['balance'], 25000)
+        self.assertTrue(cache.usage['spend']['enabled'])
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': 0})
+    def test_zero_balance_recorded(self, _mock_credits):
+        """A genuine drop to $0 is recorded, not masked by last-known retention."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+        cache._balance_cents = 25000
+
+        cache._refresh_balance()
+
+        self.assertEqual(cache._balance_cents, 0)
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': {'amount_minor': 25000}})
+    def test_money_object_amount_ignored(self, _mock_credits):
+        """A money-object 'amount' (not the current shape) is ignored, not misread."""
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache._refresh_balance()
+
+        self.assertIsNone(cache._balance_cents)
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': 25000})
+    @patch('usage_monitor_for_claude.cache.time')
+    def test_balance_throttled_within_interval(self, mock_time, mock_credits):
+        """The balance is not re-fetched again within the refresh interval."""
+        mock_time.time.return_value = 1000.0
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache._refresh_balance()   # first fetch
+        cache._refresh_balance()   # same time -> throttled
+        self.assertEqual(mock_credits.call_count, 1)
+
+        mock_time.time.return_value = 1000.0 + _BALANCE_REFRESH_INTERVAL + 1
+        cache._refresh_balance()   # interval elapsed -> re-fetch
+        self.assertEqual(mock_credits.call_count, 2)
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value=None)
+    @patch('usage_monitor_for_claude.cache.time')
+    def test_balance_not_hammered_on_failure(self, mock_time, mock_credits):
+        """A failing balance endpoint is not re-hit every poll (throttle counts attempts)."""
+        mock_time.time.return_value = 1000.0
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache._refresh_balance()
+        cache._refresh_balance()
+
+        self.assertEqual(mock_credits.call_count, 1)
+
+    def test_reset_balance_clears_and_unthrottles(self):
+        """reset_balance clears the value and lets the next refresh run immediately."""
+        cache = _make_cache()
+        cache._balance_cents = 25000
+        cache._balance_fetched_at = 12345.0
+
+        cache.reset_balance()
+
+        self.assertIsNone(cache._balance_cents)
+        self.assertEqual(cache._balance_fetched_at, 0)
+
+    @patch('usage_monitor_for_claude.cache.fetch_prepaid_credits', return_value={'amount': 25000})
+    @patch('usage_monitor_for_claude.cache.read_access_token', return_value='new-token')
+    @patch('usage_monitor_for_claude.cache.refresh_token')
+    @patch('usage_monitor_for_claude.cache.fetch_usage', return_value=_CREDITS_ENABLED_DATA)
+    def test_token_refresh_path_injects_balance(self, _mock_usage, mock_refresh, _mock_token, _mock_credits):
+        """The token-refresh retry path also injects the balance."""
+        mock_refresh.return_value = RefreshResult(success=True, updated=False, old_version='2.1.69', new_version='2.1.69', error='')
+        cache = _make_cache()
+        cache._profile = dict(self._PROFILE)
+
+        cache._try_token_refresh('old-token')
+
+        self.assertEqual(cache.usage['spend']['balance'], 25000)
 
 
 if __name__ == '__main__':

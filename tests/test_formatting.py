@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 from usage_monitor_for_claude.formatting import (
     PERIOD_5H, PERIOD_7D,
     divider_positions, elapsed_pct, expand_popup_fields, field_period, format_credits,
-    format_tooltip, parse_field_name, popup_label, time_until, tooltip_label,
+    format_tooltip, merge_scoped_limits, parse_field_name, popup_label, time_until, tooltip_label,
 )
 from usage_monitor_for_claude.i18n import LOCALE_DIR
 
@@ -315,6 +315,138 @@ class TestExpandPopupFields(unittest.TestCase):
         usage = {'five_hour': {'utilization': 0, 'resets_at': ''}}
         result = expand_popup_fields(['*'], usage)
         self.assertEqual(result, ['five_hour'])
+
+
+# ---------------------------------------------------------------------------
+# merge_scoped_limits
+# ---------------------------------------------------------------------------
+
+class TestMergeScopedLimits(unittest.TestCase):
+    """Tests for merge_scoped_limits()."""
+
+    def _scoped(self, group, display_name, percent, resets_at='2026-07-07T01:00:00+00:00'):
+        """Build a model-scoped entry as it appears in the API 'limits' array."""
+        return {
+            'kind': 'weekly_scoped', 'group': group, 'percent': percent,
+            'severity': 'critical', 'resets_at': resets_at, 'is_active': True,
+            'scope': {'model': {'id': None, 'display_name': display_name}, 'surface': None},
+        }
+
+    def test_weekly_scoped_promoted(self):
+        """A weekly model-scoped limit becomes a seven_day_<model> field."""
+        data = {'limits': [self._scoped('weekly', 'Fable', 94)]}
+        result = merge_scoped_limits(data)
+        self.assertEqual(
+            result['seven_day_fable'],
+            {'utilization': 94.0, 'resets_at': '2026-07-07T01:00:00+00:00'},
+        )
+
+    def test_session_scoped_promoted(self):
+        """A session model-scoped limit becomes a five_hour_<model> field."""
+        entry = self._scoped('session', 'Fable', 30)
+        entry['kind'] = 'session_scoped'
+        result = merge_scoped_limits({'limits': [entry]})
+        self.assertEqual(result['five_hour_fable']['utilization'], 30.0)
+
+    def test_promoted_field_flows_through_pipeline(self):
+        """A promoted field is auto-detected and labeled like any quota field."""
+        data = {
+            'five_hour': {'utilization': 17, 'resets_at': ''},
+            'seven_day': {'utilization': 75, 'resets_at': ''},
+            'limits': [self._scoped('weekly', 'Fable', 94)],
+        }
+        result = merge_scoped_limits(data)
+        fields = expand_popup_fields(['*'], result)
+        self.assertIn('seven_day_fable', fields)
+        self.assertEqual(popup_label('seven_day_fable'), EN['weekly_label'].format(suffix='Fable'))
+        self.assertEqual(tooltip_label('seven_day_fable'), '7d Fable')
+
+    def test_aggregate_entries_ignored(self):
+        """Entries without a scope (session / weekly_all) are not promoted."""
+        data = {'limits': [
+            {'kind': 'session', 'group': 'session', 'percent': 17, 'resets_at': 'x', 'scope': None},
+            {'kind': 'weekly_all', 'group': 'weekly', 'percent': 75, 'resets_at': 'x', 'scope': None},
+        ]}
+        result = merge_scoped_limits(data)
+        self.assertEqual(set(result) - {'limits'}, set())
+
+    def test_multi_word_model_name_slugified(self):
+        """Spaces in the model display name become underscores in the field name."""
+        result = merge_scoped_limits({'limits': [self._scoped('weekly', 'Claude Opus', 50)]})
+        self.assertIn('seven_day_claude_opus', result)
+        self.assertEqual(tooltip_label('seven_day_claude_opus'), '7d Claude Opus')
+
+    def test_existing_non_null_field_not_overwritten(self):
+        """A live flat field is never clobbered by a scoped entry of the same name."""
+        data = {
+            'seven_day_fable': {'utilization': 10.0, 'resets_at': 'live'},
+            'limits': [self._scoped('weekly', 'Fable', 94)],
+        }
+        result = merge_scoped_limits(data)
+        self.assertEqual(result['seven_day_fable'], {'utilization': 10.0, 'resets_at': 'live'})
+
+    def test_null_placeholder_field_replaced(self):
+        """A deprecated null flat field is replaced by the live scoped value."""
+        data = {'seven_day_fable': None, 'limits': [self._scoped('weekly', 'Fable', 94)]}
+        result = merge_scoped_limits(data)
+        self.assertEqual(result['seven_day_fable']['utilization'], 94.0)
+
+    def test_unknown_group_skipped(self):
+        """A scoped entry with an unrecognized period group is skipped."""
+        result = merge_scoped_limits({'limits': [self._scoped('monthly', 'Fable', 40)]})
+        self.assertEqual(set(result) - {'limits'}, set())
+
+    def test_missing_percent_skipped(self):
+        """A scoped entry without a percentage is skipped."""
+        entry = self._scoped('weekly', 'Fable', 40)
+        del entry['percent']
+        result = merge_scoped_limits({'limits': [entry]})
+        self.assertNotIn('seven_day_fable', result)
+
+    def test_missing_resets_at_skipped(self):
+        """A scoped entry without a reset timestamp is skipped."""
+        entry = self._scoped('weekly', 'Fable', 40)
+        entry['resets_at'] = ''
+        result = merge_scoped_limits({'limits': [entry]})
+        self.assertNotIn('seven_day_fable', result)
+
+    def test_non_numeric_percent_skipped(self):
+        """A non-numeric percentage is skipped rather than crashing float()."""
+        result = merge_scoped_limits({'limits': [self._scoped('weekly', 'Fable', 'n/a')]})
+        self.assertNotIn('seven_day_fable', result)
+
+    def test_bool_percent_skipped(self):
+        """A boolean percentage is rejected (bool is a subclass of int)."""
+        result = merge_scoped_limits({'limits': [self._scoped('weekly', 'Fable', True)]})
+        self.assertNotIn('seven_day_fable', result)
+
+    def test_inactive_scoped_limit_still_promoted(self):
+        """A limit the user is subject to is shown regardless of is_active."""
+        entry = self._scoped('weekly', 'Fable', 40)
+        entry['is_active'] = False
+        result = merge_scoped_limits({'limits': [entry]})
+        self.assertEqual(result['seven_day_fable']['utilization'], 40.0)
+
+    def test_empty_model_name_skipped(self):
+        """A scoped entry with a blank model name is skipped."""
+        result = merge_scoped_limits({'limits': [self._scoped('weekly', '   ', 40)]})
+        self.assertEqual(set(result) - {'limits'}, set())
+
+    def test_no_limits_key_unchanged(self):
+        """A response without a 'limits' array is returned unchanged."""
+        data = {'five_hour': {'utilization': 17, 'resets_at': ''}}
+        self.assertIs(merge_scoped_limits(data), data)
+
+    def test_limits_not_a_list_unchanged(self):
+        """A non-list 'limits' value is ignored."""
+        data = {'limits': None, 'five_hour': {'utilization': 17, 'resets_at': ''}}
+        self.assertIs(merge_scoped_limits(data), data)
+
+    def test_input_not_mutated(self):
+        """The input dict is never mutated (a copy is returned)."""
+        data = {'limits': [self._scoped('weekly', 'Fable', 94)]}
+        merge_scoped_limits(data)
+        self.assertEqual(set(data), {'limits'})
 
 
 # ---------------------------------------------------------------------------

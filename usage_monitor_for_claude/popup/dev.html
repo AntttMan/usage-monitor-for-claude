@@ -58,6 +58,7 @@
 <div class="dev-controls">
     <select id="langSelect" title="Language"></select>
     <button onclick="loadPreset('full')">Full data</button>
+    <button onclick="loadPreset('credits')">Usage credits (unlimited)</button>
     <button onclick="loadPreset('minimal')">Minimal (next update)</button>
     <button onclick="loadPreset('error')">Error state</button>
     <button onclick="loadPreset('refreshing')">Refreshing (hours)</button>
@@ -96,13 +97,28 @@ const PRESETS = {
             { unit: 'week', suffix: 'Opus', pct: 12, warn: false,
               reset: { kind: 'weekday', day: 'Sat', clock: '12:00' }, dividers: [0.143, 0.286, 0.429, 0.571, 0.714, 0.857], marker_rel: 0.55 },
         ],
-        extra: { pct: 23, used: '$4.60', limit: '$20.00' },
+        extra: { pct: 23, used: '$4.60', limit: '$20.00', balance: '$250.00' },
         installations: [
             { name: 'CLI', version: '2.1.69' },
             { name: 'VS Code', version: '2.1.69' },
             { name: 'Cursor', version: '2.1.65' },
         ],
         status: () => ({ last_success_time: now() - 3, next_poll_time: now() + 20, refreshing: false, error: null }),
+    },
+    credits: {
+        profile: { email: 'user@example.com', plan: 'Max' },
+        usage: [
+            { unit: 'hour', suffix: '5hr', pct: 29, warn: false,
+              reset: { kind: 'in', duration: '3h 10m', clock: '17:50' }, dividers: [0.2, 0.4, 0.6, 0.8], marker_rel: 0.3 },
+            { unit: 'week', suffix: '7 day', pct: 77, warn: true,
+              reset: { kind: 'weekday', day: 'Mon', clock: '02:00' }, dividers: [0.143, 0.286, 0.429, 0.571, 0.714, 0.857], marker_rel: 0.6 },
+            { unit: 'week', suffix: 'Fable', pct: 94, warn: true,
+              reset: { kind: 'weekday', day: 'Mon', clock: '02:00' }, dividers: [0.143, 0.286, 0.429, 0.571, 0.714, 0.857], marker_rel: 0.6 },
+        ],
+        // Unlimited monthly limit (no cap) with recorded spend and no balance - mirrors a real Max account.
+        extra: { used: '$50.90', limit: null, balance: null },
+        installations: [{ name: 'CLI', version: '2.1.85' }],
+        status: () => ({ last_success_time: now() - 5, next_poll_time: now() + 60, refreshing: false, error: null }),
     },
     minimal: {
         profile: null,
@@ -158,6 +174,7 @@ function buildTranslations(loc) {
     return {
         title: loc.popup_title, account: loc.account, email: loc.email, plan: loc.plan,
         usage: loc.usage, extra_usage: loc.extra_usage, claude_code: loc.claude_code, changelog: loc.changelog,
+        credits_monthly_limit: loc.credits_monthly_limit, credits_balance: loc.credits_balance,
         status_updated_s: loc.status_updated_s, status_updated: loc.status_updated,
         status_next_update: loc.status_next_update, status_refreshing: loc.status_refreshing,
         duration_hm: loc.duration_hm, duration_m: loc.duration_m, duration_s: loc.duration_s,
@@ -191,10 +208,13 @@ function resolveData(name, loc) {
         marker_rel: entry.marker_rel,
     }));
 
-    const extra = preset.extra ? {
-        pct_text: preset.extra.pct + '%',
-        fill_pct: preset.extra.pct / 100,
-        spent_text: loc.extra_usage_spent.replace('{used}', preset.extra.used).replace('{limit}', preset.extra.limit),
+    const pe = preset.extra;
+    const extra = pe ? {
+        spent_text: loc.extra_usage_spent.replace('{used}', pe.used),
+        limit_text: pe.limit != null ? pe.limit : loc.credits_unlimited,
+        balance_text: pe.balance != null ? pe.balance : null,
+        pct_text: pe.limit != null ? pe.pct + '%' : null,
+        fill_pct: pe.limit != null ? pe.pct / 100 : null,
     } : null;
 
     let status = typeof preset.status === 'function' ? preset.status() : preset.status;

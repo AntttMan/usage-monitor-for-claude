@@ -60,6 +60,62 @@ def _usage_entries(usage: dict[str, Any]) -> list[tuple[str, dict[str, Any] | No
     return [(popup_label(key), usage.get(key), field_period(key)) for key in fields]
 
 
+def _money_to_cents(value: Any) -> float | None:
+    """Extract a minor-unit (cents) amount from a spend money value.
+
+    The API expresses monetary amounts either as a plain number of minor units
+    or as a ``{'amount_minor': ..., 'currency': ..., 'exponent': ...}`` object.
+    Returns None when the value is absent or not a number.
+    """
+    if isinstance(value, dict):
+        value = value.get('amount_minor')
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
+def _credits_summary(usage: dict[str, Any]) -> dict[str, Any] | None:
+    """Build the usage-credits summary (spent, monthly limit, balance) for the popup.
+
+    Returns None unless credits are enabled and there is something worth
+    showing: a recorded spend, a finite monthly limit, or a current balance.
+    A finite monthly limit adds a progress bar; an unlimited limit (``null``)
+    shows the spend as text with the limit labeled accordingly.
+    """
+    extra_data = usage.get('extra_usage') or {}
+    if not extra_data.get('is_enabled'):
+        return None
+
+    used = extra_data.get('used_credits') or 0
+    # A null monthly_limit means unlimited; a number (including 0) is a real cap.
+    raw_limit = extra_data.get('monthly_limit')
+    if isinstance(raw_limit, bool) or not isinstance(raw_limit, (int, float)):
+        is_finite_limit = False
+        limit: float = 0
+    else:
+        is_finite_limit = True
+        limit = raw_limit
+    balance = _money_to_cents((usage.get('spend') or {}).get('balance'))
+
+    if not (used > 0 or limit > 0 or balance is not None):
+        return None
+
+    summary: dict[str, Any] = {
+        'spent_text': T['extra_usage_spent'].format(used=format_credits(used)),
+        'limit_text': format_credits(limit) if is_finite_limit else T['credits_unlimited'],
+        'balance_text': format_credits(balance) if balance is not None else None,
+        'pct_text': None,
+        'fill_pct': None,
+    }
+
+    if limit > 0:
+        pct = used / limit * 100
+        summary['pct_text'] = f'{pct:.0f}%'
+        summary['fill_pct'] = max(0.0, min(1.0, pct / 100))
+
+    return summary
+
+
 def _snapshot_to_dict(
     snap: CacheSnapshot, installations: list[dict[str, str]] | None = None, next_poll_time: float | None = None,
 ) -> dict[str, Any]:
@@ -107,22 +163,8 @@ def _snapshot_to_dict(
                 'marker_rel': marker_rel,
             })
 
-    # Extra usage
-    extra = None
-    if snap.usage:
-        extra_data = snap.usage.get('extra_usage')
-        if extra_data and extra_data.get('is_enabled'):
-            limit = extra_data.get('monthly_limit', 0) or 0
-            if limit > 0:
-                used = extra_data.get('used_credits', 0) or 0
-                pct = used / limit * 100
-                extra = {
-                    'pct_text': f'{pct:.0f}%',
-                    'fill_pct': max(0.0, min(1.0, pct / 100)),
-                    'spent_text': T['extra_usage_spent'].format(
-                        used=format_credits(used), limit=format_credits(limit),
-                    ),
-                }
+    # Usage credits (extra usage)
+    extra = _credits_summary(snap.usage) if snap.usage else None
 
     # Installations
     if installations is None:
@@ -161,6 +203,7 @@ def _init_config(snap: CacheSnapshot, next_poll_time: float | None = None) -> di
         't': {
             'title': T['popup_title'], 'account': T['account'], 'email': T['email'], 'plan': T['plan'],
             'usage': T['usage'], 'extra_usage': T['extra_usage'],
+            'credits_monthly_limit': T['credits_monthly_limit'], 'credits_balance': T['credits_balance'],
             'claude_code': T['claude_code'], 'changelog': T['changelog'],
             'status_updated_s': T['status_updated_s'], 'status_updated': T['status_updated'],
             'status_next_update': T['status_next_update'], 'status_refreshing': T['status_refreshing'],

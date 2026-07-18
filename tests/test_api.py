@@ -12,7 +12,10 @@ from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from usage_monitor_for_claude.api import API_URL_USAGE, _extract_server_message, _parse_retry_after, fetch_usage, read_access_token
+from usage_monitor_for_claude.api import (
+    API_URL_USAGE, _extract_server_message, _parse_retry_after,
+    fetch_prepaid_credits, fetch_usage, read_access_token,
+)
 from usage_monitor_for_claude.i18n import LOCALE_DIR
 
 EN = json.loads((LOCALE_DIR / 'en.json').read_text(encoding='utf-8'))
@@ -415,6 +418,78 @@ class TestParseRetryAfter(unittest.TestCase):
         resp = MagicMock()
         resp.headers = {'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT'}
         self.assertIsNone(_parse_retry_after(resp))
+
+
+# ---------------------------------------------------------------------------
+# fetch_prepaid_credits
+# ---------------------------------------------------------------------------
+
+class TestFetchPrepaidCredits(unittest.TestCase):
+    """Tests for fetch_prepaid_credits()."""
+
+    @patch('usage_monitor_for_claude.api.api_headers', return_value=None)
+    def test_no_token_returns_none(self, _mock_headers):
+        self.assertIsNone(fetch_prepaid_credits('org-1'))
+
+    @patch('usage_monitor_for_claude.api.api_headers', return_value={'Authorization': 'Bearer test'})
+    def test_no_org_uuid_returns_none(self, _mock_headers):
+        self.assertIsNone(fetch_prepaid_credits(''))
+
+    @patch('usage_monitor_for_claude.api.requests.get')
+    @patch('usage_monitor_for_claude.api.api_headers', return_value={'Authorization': 'Bearer test'})
+    def test_success(self, _mock_headers, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {'amount': 25000, 'currency': 'USD', 'balance_credits': 250}
+        mock_get.return_value = mock_resp
+
+        result = fetch_prepaid_credits('org-abc')
+
+        assert result is not None
+        self.assertEqual(result['amount'], 25000)
+        mock_get.assert_called_once_with(
+            'https://api.anthropic.com/api/oauth/organizations/org-abc/prepaid/credits',
+            headers={'Authorization': 'Bearer test'}, timeout=10,
+        )
+
+    @patch('usage_monitor_for_claude.api.requests.get')
+    @patch('usage_monitor_for_claude.api.api_headers', return_value={'Authorization': 'Bearer test'})
+    def test_only_calls_anthropic_domain(self, _mock_headers, mock_get):
+        """The request stays on api.anthropic.com (no other destinations)."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {'amount': 0}
+        mock_get.return_value = mock_resp
+
+        fetch_prepaid_credits('org-abc')
+
+        self.assertTrue(mock_get.call_args[0][0].startswith('https://api.anthropic.com/'))
+
+    @patch('usage_monitor_for_claude.api.requests.get')
+    @patch('usage_monitor_for_claude.api.api_headers', return_value={'Authorization': 'Bearer test'})
+    def test_uuid_cannot_change_host(self, _mock_headers, mock_get):
+        """A hostile org_uuid cannot redirect the request off api.anthropic.com."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {'amount': 0}
+        mock_get.return_value = mock_resp
+
+        fetch_prepaid_credits('../../evil.example.com/x')
+
+        self.assertTrue(mock_get.call_args[0][0].startswith('https://api.anthropic.com/'))
+
+    @patch('usage_monitor_for_claude.api.requests.get')
+    @patch('usage_monitor_for_claude.api.api_headers', return_value={'Authorization': 'Bearer test'})
+    def test_http_error_returns_none(self, _mock_headers, mock_get):
+        import requests
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = requests.HTTPError()
+        mock_get.return_value = mock_resp
+        self.assertIsNone(fetch_prepaid_credits('org-abc'))
+
+    @patch('usage_monitor_for_claude.api.requests.get')
+    @patch('usage_monitor_for_claude.api.api_headers', return_value={'Authorization': 'Bearer test'})
+    def test_connection_error_returns_none(self, _mock_headers, mock_get):
+        import requests
+        mock_get.side_effect = requests.ConnectionError()
+        self.assertIsNone(fetch_prepaid_credits('org-abc'))
 
 
 if __name__ == '__main__':

@@ -15,13 +15,18 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .api import fetch_profile, fetch_usage, read_access_token
+from .api import fetch_prepaid_credits, fetch_profile, fetch_usage, read_access_token
 from .claude_cli import RefreshResult, refresh_token
+from .formatting import merge_scoped_limits
 from .settings import MAX_BACKOFF, POLL_FAST, POLL_INTERVAL
 
 __all__ = ['CacheSnapshot', 'UpdateResult', 'UsageCache']
 
 log = logging.getLogger(__name__)
+
+# The prepaid balance changes rarely (only on spend or purchase), so it is
+# refreshed far less often than usage to avoid doubling request volume.
+_BALANCE_REFRESH_INTERVAL = 900
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,9 @@ class UsageCache:
         self._consecutive_errors = 0
         self._last_failed_token: str | None = None
         self._rate_limit_until: float = 0
+        # Last-known prepaid balance in minor units; kept across transient balance-fetch failures.
+        self._balance_cents: float | None = None
+        self._balance_fetched_at: float = 0
 
     # Public properties
 
@@ -246,6 +254,7 @@ class UsageCache:
                 self._version += 1
             return UpdateResult(data=data, token_refresh=token_refresh)
 
+        data = self._augment_usage(data)
         pct_5h = (data.get('five_hour') or {}).get('utilization')
         pct_7d = (data.get('seven_day') or {}).get('utilization')
         log.info('fetch_usage -> OK (5h: %s%%, 7d: %s%%)', pct_5h if pct_5h is not None else '?', pct_7d if pct_7d is not None else '?')
@@ -285,6 +294,71 @@ class UsageCache:
             self._refreshing = False
             self._version += 1
 
+    def _augment_usage(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Fold model-scoped limits and the prepaid balance into a usage response.
+
+        Model-scoped weekly limits are promoted to top-level fields; the
+        prepaid credit balance (fetched separately and cached) is written into
+        ``spend.balance`` so the popup's usage-credits section can show it.
+        The balance is only fetched when usage credits are enabled - there is
+        no point querying a wallet whose value would never be displayed.  The
+        input dict is not mutated.
+        """
+        data = merge_scoped_limits(data)
+
+        extra = data.get('extra_usage')
+        if isinstance(extra, dict) and extra.get('is_enabled'):
+            self._refresh_balance()
+            if self._balance_cents is not None:
+                data = dict(data)
+                spend = data.get('spend')
+                spend = dict(spend) if isinstance(spend, dict) else {}
+                spend['balance'] = self._balance_cents
+                data['spend'] = spend
+
+        return data
+
+    def _refresh_balance(self) -> None:
+        """Best-effort refresh of the cached prepaid balance from the org wallet.
+
+        Throttled to ``_BALANCE_REFRESH_INTERVAL`` (the balance changes rarely)
+        and skipped while the shared rate-limit backoff is active.  Reads the
+        organization UUID from the cached profile and queries the prepaid-credits
+        endpoint.  The last-known balance is retained on any failure so a
+        transient problem does not make the balance flicker out of the popup.
+        """
+        now = time.time()
+        if now < self._rate_limit_until:
+            return
+        if now - self._balance_fetched_at < _BALANCE_REFRESH_INTERVAL:
+            return
+
+        profile = self._profile
+        org_uuid = (profile.get('organization') or {}).get('uuid') if isinstance(profile, dict) else None
+        if not org_uuid:
+            return
+
+        # Count the attempt (even on failure) so a failing endpoint is not re-hit every poll.
+        self._balance_fetched_at = now
+        wallet = fetch_prepaid_credits(org_uuid)
+        if not isinstance(wallet, dict):
+            return
+
+        amount = wallet.get('amount')
+        if not isinstance(amount, bool) and isinstance(amount, (int, float)):
+            self._balance_cents = amount
+
+    def reset_balance(self) -> None:
+        """Clear the cached prepaid balance so the next poll re-fetches it.
+
+        Called on account switch so a previous account's balance is never shown
+        for the new account (and to defeat the refresh throttle after a switch).
+        The fields are only read/written during a locked update on the same
+        poll thread, so no lock is needed here.
+        """
+        self._balance_cents = None
+        self._balance_fetched_at = 0
+
     def _try_token_refresh(self, token_before: str | None) -> RefreshResult | None:
         """Attempt to refresh the OAuth token via ``claude update``.
 
@@ -314,7 +388,7 @@ class UsageCache:
         data = fetch_usage()
         if 'error' not in data:
             log.info('retry -> OK')
-            self._record_success(data)
+            self._record_success(self._augment_usage(data))
             return result
 
         log.warning('retry -> error: %s', data['error'])

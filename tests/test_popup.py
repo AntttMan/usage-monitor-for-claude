@@ -12,7 +12,11 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from usage_monitor_for_claude.cache import CacheSnapshot
-from usage_monitor_for_claude.popup import UsagePopup, _BASELINE_DPI, _MONITORINFO, _init_config, _snapshot_to_dict, _usage_entries
+from usage_monitor_for_claude.i18n import T
+from usage_monitor_for_claude.popup import (
+    UsagePopup, _BASELINE_DPI, _MONITORINFO, _credits_summary, _init_config,
+    _money_to_cents, _snapshot_to_dict, _usage_entries,
+)
 
 
 def _snap(
@@ -135,6 +139,35 @@ class TestUsageEntries(unittest.TestCase):
         entries = _usage_entries(usage)
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0][1]['utilization'], 42)
+
+
+# ---------------------------------------------------------------------------
+# _money_to_cents
+# ---------------------------------------------------------------------------
+
+class TestMoneyToCents(unittest.TestCase):
+    """Tests for _money_to_cents - extracts a cents amount from a spend value."""
+
+    def test_money_object(self):
+        self.assertEqual(_money_to_cents({'amount_minor': 25000, 'currency': 'USD', 'exponent': 2}), 25000)
+
+    def test_plain_number(self):
+        self.assertEqual(_money_to_cents(5090), 5090)
+
+    def test_float(self):
+        self.assertEqual(_money_to_cents(5090.0), 5090.0)
+
+    def test_none(self):
+        self.assertIsNone(_money_to_cents(None))
+
+    def test_money_object_without_amount(self):
+        self.assertIsNone(_money_to_cents({'currency': 'USD'}))
+
+    def test_bool_rejected(self):
+        self.assertIsNone(_money_to_cents(True))
+
+    def test_string_rejected(self):
+        self.assertIsNone(_money_to_cents('n/a'))
 
 
 # ---------------------------------------------------------------------------
@@ -342,15 +375,15 @@ class TestSnapshotToDict(unittest.TestCase):
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
         self.assertIsNone(result['extra'])
 
-    def test_extra_usage_zero_limit(self):
-        """Extra is None when monthly limit is zero."""
+    def test_extra_usage_zero_limit_no_spend(self):
+        """Extra is None when limit is zero, nothing spent, and no balance."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 0, 'used_credits': 0}}
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
         self.assertIsNone(result['extra'])
 
     @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
     def test_extra_usage_calculation(self, _mock_credits):
-        """Extra usage computes percentage and formatted text correctly."""
+        """A finite monthly limit yields a percentage, a bar, and a limit value."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 10000, 'used_credits': 2500}}
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
 
@@ -359,7 +392,8 @@ class TestSnapshotToDict(unittest.TestCase):
         self.assertEqual(extra['pct_text'], '25%')
         self.assertAlmostEqual(extra['fill_pct'], 0.25)
         self.assertIn('$25.00', extra['spent_text'])
-        self.assertIn('$100.00', extra['spent_text'])
+        self.assertEqual(extra['limit_text'], '$100.00')
+        self.assertIsNone(extra['balance_text'])
 
     @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
     def test_extra_usage_fill_clamped(self, _mock_credits):
@@ -367,6 +401,67 @@ class TestSnapshotToDict(unittest.TestCase):
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 1000, 'used_credits': 2000}}
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
         self.assertEqual(result['extra']['fill_pct'], 1.0)
+
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    def test_extra_usage_unlimited_shows_spend(self, _mock_credits):
+        """An unlimited monthly limit (null) shows spend as text with no bar."""
+        usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': None, 'used_credits': 5090}}
+        extra = _snapshot_to_dict(_snap(usage=usage), installations=[])['extra']
+        self.assertIsNotNone(extra)
+        self.assertIn('$50.90', extra['spent_text'])
+        self.assertEqual(extra['limit_text'], T['credits_unlimited'])
+        self.assertIsNone(extra['pct_text'])
+        self.assertIsNone(extra['fill_pct'])
+
+    def test_extra_usage_unlimited_no_spend_hidden(self):
+        """An unlimited plan with nothing spent and no balance is hidden."""
+        usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': None, 'used_credits': 0}}
+        result = _snapshot_to_dict(_snap(usage=usage), installations=[])
+        self.assertIsNone(result['extra'])
+
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    def test_extra_usage_balance_from_spend(self, _mock_credits):
+        """A current balance from the spend object is shown, and forces the section visible."""
+        usage = {
+            'extra_usage': {'is_enabled': True, 'monthly_limit': None, 'used_credits': 0},
+            'spend': {'balance': {'amount_minor': 25000, 'currency': 'USD', 'exponent': 2}},
+        }
+        extra = _snapshot_to_dict(_snap(usage=usage), installations=[])['extra']
+        self.assertIsNotNone(extra)
+        self.assertEqual(extra['balance_text'], '$250.00')
+
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    def test_extra_usage_balance_plain_number(self, _mock_credits):
+        """A balance given as a plain number (older API form) is also shown."""
+        usage = {
+            'extra_usage': {'is_enabled': True, 'monthly_limit': None, 'used_credits': 0},
+            'spend': {'balance': 25000},
+        }
+        extra = _snapshot_to_dict(_snap(usage=usage), installations=[])['extra']
+        self.assertEqual(extra['balance_text'], '$250.00')
+
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    def test_extra_usage_finite_limit_with_balance(self, _mock_credits):
+        """A finite limit and a balance together populate the bar, limit, and balance."""
+        usage = {
+            'extra_usage': {'is_enabled': True, 'monthly_limit': 10000, 'used_credits': 2500},
+            'spend': {'balance': {'amount_minor': 25000, 'currency': 'USD', 'exponent': 2}},
+        }
+        extra = _snapshot_to_dict(_snap(usage=usage), installations=[])['extra']
+        self.assertEqual(extra['pct_text'], '25%')
+        self.assertAlmostEqual(extra['fill_pct'], 0.25)
+        self.assertEqual(extra['limit_text'], '$100.00')
+        self.assertEqual(extra['balance_text'], '$250.00')
+
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    def test_extra_usage_zero_limit_with_spend(self, _mock_credits):
+        """A literal zero cap is labeled as $0.00, not 'Unlimited', with no bar."""
+        usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 0, 'used_credits': 500}}
+        extra = _snapshot_to_dict(_snap(usage=usage), installations=[])['extra']
+        self.assertIsNotNone(extra)
+        self.assertEqual(extra['limit_text'], '$0.00')
+        self.assertNotEqual(extra['limit_text'], T['credits_unlimited'])
+        self.assertIsNone(extra['fill_pct'])
 
     # -- installations --
 

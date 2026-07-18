@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The detail popup's usage-credits section (renamed from "Extra usage" to "Usage credits") now shows your monthly spend limit and current credit balance, and it appears even on an unlimited plan so your spend is always visible - previously the whole section was hidden whenever the monthly limit was unlimited
+
 ### Fixed
 
+- Per-model weekly limits (such as Fable) are now shown again - the usage API moved these limits out of the flat `seven_day_<model>` fields into a new `limits` array, so they had stopped appearing in the popup and no longer triggered threshold alerts; they are now detected from the new structure and displayed as their own usage bars like before
 - [The status footer no longer cuts off text in several languages](https://github.com/jens-duttke/usage-monitor-for-claude/issues/53) - the "next update" line was too long to fit the popup width in Spanish, French, Italian, Portuguese, Ukrainian, and Indonesian and got truncated; the affected phrases are now shorter so the full status fits on one line, and a long error message now shows in full on hover
 
 [Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.16.0...HEAD)
