@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 from usage_monitor_for_claude.cache import CacheSnapshot
 from usage_monitor_for_claude.i18n import T
 from usage_monitor_for_claude.popup import (
-    UsagePopup, _BASELINE_DPI, _MONITORINFO, _credits_summary, _init_config,
-    _money_to_cents, _snapshot_to_dict, _usage_entries,
+    UsagePopup, _BASELINE_DPI, _MONITORINFO, _SWP_NOACTIVATE, _SWP_NOSIZE, _SWP_NOZORDER,
+    _credits_summary, _init_config, _money_to_cents, _snapshot_to_dict, _usage_entries,
 )
 
 
@@ -83,6 +83,16 @@ class TestUsageEntries(unittest.TestCase):
         self.assertEqual(len(entries), 2)
         self.assertIs(entries[0][1], five_hour)
         self.assertIs(entries[1][1], seven_day)
+
+    def test_entry_includes_field_key(self):
+        """Each entry's 4th element is the raw API field name."""
+        usage = {
+            'five_hour': {'utilization': 42, 'resets_at': '2026-01-01T00:00:00Z'},
+            'seven_day_opus': {'utilization': 10, 'resets_at': '2026-01-07T00:00:00Z'},
+        }
+        entries = _usage_entries(usage)
+        keys = [e[3] for e in entries]
+        self.assertEqual(keys, ['five_hour', 'seven_day_opus'])
 
     def test_empty_usage_returns_empty(self):
         """Empty usage dict returns no entries."""
@@ -241,6 +251,21 @@ class TestSnapshotToDict(unittest.TestCase):
         self.assertEqual(bar['reset_text'], '5h 0m')
         self.assertEqual(bar['dividers'], [])
 
+    def test_field_with_null_resets_at(self):
+        """An inactive scoped limit (resets_at None) renders a 0% bar with no reset text."""
+        usage = {'seven_day_fable': {'utilization': 0.0, 'resets_at': None}}
+        result = _snapshot_to_dict(_snap(usage=usage), installations=[])
+
+        self.assertEqual(len(result['usage']), 1)
+        bar = result['usage'][0]
+        self.assertEqual(bar['key'], 'seven_day_fable')
+        self.assertEqual(bar['pct_text'], '0%')
+        self.assertEqual(bar['fill_pct'], 0.0)
+        self.assertEqual(bar['reset_text'], '')
+        self.assertEqual(bar['dividers'], [])
+        self.assertIsNone(bar['marker_rel'])
+        self.assertFalse(bar['warn'])
+
     @patch('usage_monitor_for_claude.popup.elapsed_pct', return_value=30.0)
     @patch('usage_monitor_for_claude.popup.time_until', return_value='3h 30m')
     @patch('usage_monitor_for_claude.popup.divider_positions', return_value=[0.5])
@@ -328,6 +353,19 @@ class TestSnapshotToDict(unittest.TestCase):
         pcts = [b['pct_text'] for b in result['usage']]
         self.assertEqual(pcts, ['10%', '20%', '30%'])
 
+    @patch('usage_monitor_for_claude.popup.elapsed_pct', return_value=None)
+    @patch('usage_monitor_for_claude.popup.time_until', return_value='')
+    @patch('usage_monitor_for_claude.popup.divider_positions', return_value=[])
+    def test_usage_bar_includes_field_key(self, _mock_div, _mock_tu, _mock_ep):
+        """Each usage bar dict carries its API field name for compact hiding."""
+        usage = {
+            'five_hour': {'utilization': 10, 'resets_at': '2026-01-01T05:00:00Z'},
+            'seven_day_opus': {'utilization': 30, 'resets_at': '2026-01-07T00:00:00Z'},
+        }
+        result = _snapshot_to_dict(_snap(usage=usage), installations=[])
+        keys = [bar['key'] for bar in result['usage']]
+        self.assertEqual(keys, ['five_hour', 'seven_day_opus'])
+
     @patch('usage_monitor_for_claude.popup.POPUP_FIELDS', ['typo_field', 'seven_day'])
     @patch('usage_monitor_for_claude.popup.elapsed_pct', return_value=None)
     @patch('usage_monitor_for_claude.popup.time_until', return_value='')
@@ -381,7 +419,7 @@ class TestSnapshotToDict(unittest.TestCase):
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
         self.assertIsNone(result['extra'])
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_calculation(self, _mock_credits):
         """A finite monthly limit yields a percentage, a bar, and a limit value."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 10000, 'used_credits': 2500}}
@@ -395,14 +433,14 @@ class TestSnapshotToDict(unittest.TestCase):
         self.assertEqual(extra['limit_text'], '$100.00')
         self.assertIsNone(extra['balance_text'])
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_fill_clamped(self, _mock_credits):
         """Extra usage fill is clamped to 1.0 when over limit."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 1000, 'used_credits': 2000}}
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
         self.assertEqual(result['extra']['fill_pct'], 1.0)
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_unlimited_shows_spend(self, _mock_credits):
         """An unlimited monthly limit (null) shows spend as text with no bar."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': None, 'used_credits': 5090}}
@@ -419,7 +457,7 @@ class TestSnapshotToDict(unittest.TestCase):
         result = _snapshot_to_dict(_snap(usage=usage), installations=[])
         self.assertIsNone(result['extra'])
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_balance_from_spend(self, _mock_credits):
         """A current balance from the spend object is shown, and forces the section visible."""
         usage = {
@@ -430,7 +468,7 @@ class TestSnapshotToDict(unittest.TestCase):
         self.assertIsNotNone(extra)
         self.assertEqual(extra['balance_text'], '$250.00')
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_balance_plain_number(self, _mock_credits):
         """A balance given as a plain number (older API form) is also shown."""
         usage = {
@@ -440,7 +478,7 @@ class TestSnapshotToDict(unittest.TestCase):
         extra = _snapshot_to_dict(_snap(usage=usage), installations=[])['extra']
         self.assertEqual(extra['balance_text'], '$250.00')
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_finite_limit_with_balance(self, _mock_credits):
         """A finite limit and a balance together populate the bar, limit, and balance."""
         usage = {
@@ -453,7 +491,7 @@ class TestSnapshotToDict(unittest.TestCase):
         self.assertEqual(extra['limit_text'], '$100.00')
         self.assertEqual(extra['balance_text'], '$250.00')
 
-    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c: f'${c / 100:.2f}')
+    @patch('usage_monitor_for_claude.popup.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}')
     def test_extra_usage_zero_limit_with_spend(self, _mock_credits):
         """A literal zero cap is labeled as $0.00, not 'Unlimited', with no bar."""
         usage = {'extra_usage': {'is_enabled': True, 'monthly_limit': 0, 'used_credits': 500}}
@@ -546,9 +584,15 @@ class TestInitConfig(unittest.TestCase):
     """Tests for _init_config - builds the JS init() config object."""
 
     def test_top_level_keys(self):
-        """Config has colors, t (translations), app_version, and data."""
+        """Config has colors, t (translations), app_version, compact_hide, and data."""
         config = _init_config(_snap())
-        self.assertEqual(set(config.keys()), {'colors', 't', 'app_version', 'data'})
+        self.assertEqual(set(config.keys()), {'colors', 't', 'app_version', 'compact_hide', 'data'})
+
+    @patch('usage_monitor_for_claude.popup.COMPACT_HIDE', ['account', 'seven_day_opus'])
+    def test_compact_hide_from_settings(self):
+        """compact_hide is taken from the COMPACT_HIDE setting."""
+        config = _init_config(_snap())
+        self.assertEqual(config['compact_hide'], ['account', 'seven_day_opus'])
 
     def test_colors_from_settings(self):
         """Color values come from settings module constants."""
@@ -581,6 +625,8 @@ class TestInitConfig(unittest.TestCase):
         self.assertEqual(t['extra_usage'], T['extra_usage'])
         self.assertEqual(t['claude_code'], T['claude_code'])
         self.assertEqual(t['changelog'], T['changelog'])
+        self.assertEqual(t['pin_popup'], T['pin_popup'])
+        self.assertEqual(t['unpin_popup'], T['unpin_popup'])
         self.assertEqual(t['status_updated_s'], T['status_updated_s'])
         self.assertEqual(t['status_updated'], T['status_updated'])
         self.assertEqual(t['status_refreshing'], T['status_refreshing'])
@@ -602,6 +648,122 @@ class TestInitConfig(unittest.TestCase):
         config = _init_config(snap)
         self.assertEqual(config['data']['profile']['email'], 'a@b.com')
         self.assertEqual(set(config['data'].keys()), {'profile', 'usage', 'extra', 'installations', 'status'})
+
+
+# ---------------------------------------------------------------------------
+# Pin state
+# ---------------------------------------------------------------------------
+
+class TestPinState(unittest.TestCase):
+    """Tests for UsagePopup pin state."""
+
+    def test_set_pinned_updates_state(self):
+        popup = object.__new__(UsagePopup)
+        popup._pinned = False
+
+        self.assertTrue(popup._set_pinned(True))
+        self.assertTrue(popup._pinned)
+
+        popup._moved_while_pinned = True
+        self.assertFalse(popup._set_pinned(False))
+        self.assertFalse(popup._pinned)
+        self.assertFalse(popup._moved_while_pinned)
+
+    def test_begin_drag_ignored_when_unpinned(self):
+        popup = object.__new__(UsagePopup)
+        popup._pinned = False
+        popup._popup_hwnd = 12345
+        popup._dragging = False
+
+        self.assertFalse(popup._begin_drag())
+        self.assertFalse(popup._dragging)
+
+    def test_begin_drag_anchors_physical_cursor_offset(self):
+        popup = object.__new__(UsagePopup)
+        popup._pinned = True
+        popup._popup_hwnd = 12345
+        popup._dragging = False
+
+        def fill_cursor(ptr):
+            point = ctypes.cast(ptr, ctypes.POINTER(ctypes.wintypes.POINT)).contents
+            point.x = 500
+            point.y = 400
+
+        def fill_rect(_hwnd, ptr):
+            rect = ctypes.cast(ptr, ctypes.POINTER(ctypes.wintypes.RECT)).contents
+            rect.left = 460
+            rect.top = 360
+
+        with patch('ctypes.windll.user32.GetCursorPos', side_effect=fill_cursor), \
+             patch('ctypes.windll.user32.GetWindowRect', side_effect=fill_rect), \
+             patch('ctypes.windll.user32.GetDpiForWindow', return_value=96):
+            self.assertTrue(popup._begin_drag())
+
+        self.assertTrue(popup._dragging)
+        self.assertEqual(popup._drag_offset, (40, 40))
+        self.assertEqual(popup._drag_start_dpi, 96)
+
+    def test_drag_ignored_when_not_dragging(self):
+        popup = object.__new__(UsagePopup)
+        popup._pinned = True
+        popup._dragging = False
+        popup._popup_hwnd = 12345
+
+        with patch('ctypes.windll.user32.SetWindowPos') as mock_set_pos:
+            self.assertFalse(popup._drag())
+        mock_set_pos.assert_not_called()
+
+    def test_drag_moves_popup_to_physical_cursor(self):
+        popup = object.__new__(UsagePopup)
+        popup._pinned = True
+        popup._dragging = True
+        popup._popup_hwnd = 12345
+        popup._drag_offset = (40, 40)
+        popup._moved_while_pinned = False
+
+        def fill_cursor(ptr):
+            point = ctypes.cast(ptr, ctypes.POINTER(ctypes.wintypes.POINT)).contents
+            point.x = 700
+            point.y = 620
+
+        with patch('ctypes.windll.user32.GetCursorPos', side_effect=fill_cursor), \
+             patch('ctypes.windll.user32.SetWindowPos') as mock_set_pos:
+            self.assertTrue(popup._drag())
+
+        mock_set_pos.assert_called_once_with(
+            12345, 0, 660, 580, 0, 0, _SWP_NOSIZE | _SWP_NOZORDER | _SWP_NOACTIVATE,
+        )
+        self.assertTrue(popup._moved_while_pinned)
+
+    def test_end_drag_reasserts_size_on_dpi_change(self):
+        popup = object.__new__(UsagePopup)
+        popup.WIDTH = UsagePopup.WIDTH
+        popup._popup_hwnd = 12345
+        popup._dragging = True
+        popup._drag_start_dpi = 96
+        popup._last_height = 500
+        popup._window = MagicMock()
+
+        with patch('ctypes.windll.user32.GetDpiForWindow', return_value=144):
+            popup._end_drag()
+
+        self.assertFalse(popup._dragging)
+        popup._window.resize.assert_called_once_with(UsagePopup.WIDTH, 500)
+
+    def test_end_drag_keeps_size_without_dpi_change(self):
+        popup = object.__new__(UsagePopup)
+        popup.WIDTH = UsagePopup.WIDTH
+        popup._popup_hwnd = 12345
+        popup._dragging = True
+        popup._drag_start_dpi = 96
+        popup._last_height = 500
+        popup._window = MagicMock()
+
+        with patch('ctypes.windll.user32.GetDpiForWindow', return_value=96):
+            popup._end_drag()
+
+        self.assertFalse(popup._dragging)
+        popup._window.resize.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +883,8 @@ class TestResizeAndPosition(unittest.TestCase):
         popup = object.__new__(UsagePopup)
         popup.WIDTH = UsagePopup.WIDTH
         popup._popup_hwnd = 12345
+        popup._pinned = False
+        popup._moved_while_pinned = False
 
         mock_window = MagicMock()
         popup._window = mock_window
@@ -784,6 +948,8 @@ class TestResizeAndPosition(unittest.TestCase):
         popup = object.__new__(UsagePopup)
         popup.WIDTH = UsagePopup.WIDTH
         popup._popup_hwnd = 12345
+        popup._pinned = False
+        popup._moved_while_pinned = False
 
         mock_window = MagicMock()
         popup._window = mock_window
@@ -809,6 +975,23 @@ class TestResizeAndPosition(unittest.TestCase):
 
         mock_sys_dpi.assert_called()
         mock_window.resize.assert_called_once_with(340, 500)
+
+    def test_pinned_moved_popup_resizes_without_snapping_to_tray(self):
+        """A moved pinned popup keeps its position when content height changes."""
+        popup = object.__new__(UsagePopup)
+        popup.WIDTH = UsagePopup.WIDTH
+        popup._popup_hwnd = 12345
+        popup._pinned = True
+        popup._moved_while_pinned = True
+
+        mock_window = MagicMock()
+        popup._window = mock_window
+
+        with patch('ctypes.windll.user32.GetDpiForWindow', return_value=_BASELINE_DPI):
+            popup._resize_and_position(500)
+
+        mock_window.resize.assert_called_once_with(340, 500)
+        mock_window.move.assert_not_called()
 
 
 if __name__ == '__main__':

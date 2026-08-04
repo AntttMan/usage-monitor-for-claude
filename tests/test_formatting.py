@@ -650,6 +650,7 @@ class TestDividerPositions(unittest.TestCase):
 # time_until
 # ---------------------------------------------------------------------------
 
+@patch('usage_monitor_for_claude.formatting.TIME_FORMAT', '24h')
 @patch('usage_monitor_for_claude.formatting.T', EN)
 @patch('usage_monitor_for_claude.formatting.datetime')
 class TestTimeUntil(unittest.TestCase):
@@ -657,7 +658,8 @@ class TestTimeUntil(unittest.TestCase):
 
     Uses MagicMock for fromisoformat's return value so that
     astimezone() returns a controlled local datetime, making
-    tests timezone-independent.
+    tests timezone-independent.  ``TIME_FORMAT`` is pinned to ``'24h'`` so the
+    default-format assertions do not depend on the test machine's locale.
     """
 
     def _setup(self, mock_dt, utc_now, local_now, reset_local, remaining):
@@ -716,6 +718,30 @@ class TestTimeUntil(unittest.TestCase):
             datetime(2025, 1, 15, 12, 1, 0), timedelta(minutes=1))
         self.assertEqual(time_until('ignored'), 'Resets in 1m (12:01)')
 
+    def test_imminent_last_minute(self, mock_dt):
+        """Under a minute before the reset shows the imminent marker, not empty."""
+        utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 12, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 12, 0, 30), timedelta(seconds=30))
+        self.assertEqual(time_until('ignored'), 'Reset imminent')
+
+    def test_imminent_just_after_reset(self, mock_dt):
+        """Just past the reset (server not caught up yet) still shows the marker."""
+        utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 12, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 11, 59, 30), timedelta(seconds=-30))
+        self.assertEqual(time_until('ignored'), 'Reset imminent')
+
+    def test_long_past_reset_returns_empty(self, mock_dt):
+        """A clearly stale (long-past) reset time collapses to empty."""
+        utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 12, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 11, 58, 0), timedelta(seconds=-120))
+        self.assertEqual(time_until('ignored'), '')
+
     def test_tomorrow(self, mock_dt):
         """Reset tomorrow."""
         utc_now = datetime(2025, 1, 15, 22, 0, 0, tzinfo=timezone.utc)
@@ -757,13 +783,13 @@ class TestTimeUntil(unittest.TestCase):
             datetime(2025, 1, 15, 12, 30, 30), timedelta(hours=2, minutes=30, seconds=30))
         self.assertIn('12:31', time_until('ignored'))
 
-    def test_less_than_60_seconds_returns_empty(self, mock_dt):
-        """Less than 60 seconds remaining rounds to 0 minutes, returns empty."""
+    def test_less_than_60_seconds_shows_imminent(self, mock_dt):
+        """Under a minute before the reset shows the imminent marker instead of empty."""
         utc_now = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
         local_now = datetime(2025, 1, 15, 12, 0, 0)
         self._setup(mock_dt, utc_now, local_now,
             datetime(2025, 1, 15, 12, 0, 59), timedelta(seconds=59))
-        self.assertEqual(time_until('ignored'), '')
+        self.assertEqual(time_until('ignored'), 'Reset imminent')
 
     def test_exactly_60_seconds_shows_one_minute(self, mock_dt):
         """Exactly 60 seconds remaining rounds to 1 minute, shown."""
@@ -784,6 +810,34 @@ class TestTimeUntil(unittest.TestCase):
 
         self.assertIn('00:00', result)
         self.assertIn('tomorrow', result)
+
+    def test_twelve_hour_pm(self, mock_dt):
+        """clock_24h=False formats an afternoon reset in 12-hour style."""
+        utc_now = datetime(2025, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 10, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 14, 30, 0), timedelta(hours=4, minutes=30))
+        result = time_until('ignored', clock_24h=False)
+        self.assertIn('2:30', result)
+        self.assertNotIn('14:30', result)
+
+    def test_twelve_hour_strips_leading_zero(self, mock_dt):
+        """12-hour morning reset drops the leading zero from the hour."""
+        utc_now = datetime(2025, 1, 15, 5, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 5, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 9, 5, 0), timedelta(hours=4, minutes=5))
+        result = time_until('ignored', clock_24h=False)
+        self.assertIn('9:05', result)
+        self.assertNotIn('09:05', result)
+
+    def test_twenty_four_hour_explicit(self, mock_dt):
+        """clock_24h=True keeps the existing 24-hour clock string."""
+        utc_now = datetime(2025, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+        local_now = datetime(2025, 1, 15, 10, 0, 0)
+        self._setup(mock_dt, utc_now, local_now,
+            datetime(2025, 1, 15, 14, 30, 0), timedelta(hours=4, minutes=30))
+        self.assertEqual(time_until('ignored', clock_24h=True), 'Resets in 4h 30m (14:30)')
 
 
 # ---------------------------------------------------------------------------
@@ -1006,6 +1060,42 @@ class TestFormatCredits(unittest.TestCase):
     def test_zero_cents(self, mock_currency):
         """Zero cents formats correctly."""
         self.assertEqual(format_credits(0.0), '$0.00')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', return_value='$10.00')
+    def test_api_currency_overrides_system_symbol(self, mock_currency):
+        """The API billing currency replaces the system symbol when they differ."""
+        self.assertEqual(format_credits(1000.0, 'EUR'), '€10.00')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '€')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', 'CHF')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', return_value='10,00 €')
+    def test_user_override_wins_over_api_currency(self, mock_currency):
+        """An explicit currency_symbol override takes precedence over the API currency."""
+        self.assertEqual(format_credits(1000.0, 'USD'), '10,00 CHF')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', side_effect=ValueError)
+    def test_decimal_places_zero_divides_by_one(self, mock_currency):
+        """decimal_places=0 treats the amount as whole units (no /100)."""
+        self.assertEqual(format_credits(1000.0, 'JPY', 0), '¥ 1000')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', side_effect=ValueError)
+    def test_unknown_currency_uses_iso_code(self, mock_currency):
+        """An unmapped currency code is shown verbatim as the symbol."""
+        self.assertEqual(format_credits(500.0, 'XYZ'), 'XYZ 5.00')
+
+    @patch('usage_monitor_for_claude.formatting._SYSTEM_CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting.CURRENCY_SYMBOL', '$')
+    @patch('usage_monitor_for_claude.formatting._locale.currency', return_value='$1.00')
+    def test_decimal_places_scales_amount(self, mock_currency):
+        """decimal_places controls the minor-unit divisor passed to locale.currency."""
+        format_credits(1000.0, 'USD', 3)
+        mock_currency.assert_called_once_with(1.0, grouping=True)
 
 
 if __name__ == '__main__':

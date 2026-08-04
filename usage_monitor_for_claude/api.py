@@ -70,7 +70,7 @@ def fetch_usage() -> dict[str, Any]:
     try:
         resp = requests.get(API_URL_USAGE, headers=headers, timeout=10)
         resp.raise_for_status()
-        return resp.json()
+        return _merge_scoped_limits(resp.json())
     except requests.ConnectionError:
         return {'error': T['connection_error']}
     except requests.HTTPError as e:
@@ -138,6 +138,80 @@ def fetch_prepaid_credits(org_uuid: str) -> dict[str, Any] | None:
 
 
 # Helpers
+
+
+def _merge_scoped_limits(data: dict[str, Any]) -> dict[str, Any]:
+    """Expose model-scoped limits from the ``limits`` array as quota fields.
+
+    Newer usage responses carry per-model weekly limits only inside the
+    ``limits`` array (via ``scope.model``), no longer as top-level fields
+    like ``seven_day_sonnet``.  To keep them visible without hardcoding any
+    field name, each active scoped limit is mapped onto a synthetic quota
+    field that the existing field-name auto-detection understands.
+
+    The period prefix is derived from the response, not assumed: the
+    non-scoped limit of the same ``group`` shares its ``resets_at`` with an
+    existing top-level quota field, whose name supplies the prefix (e.g. a
+    weekly limit scoped to Fable becomes ``seven_day_fable``).  Inactive
+    scoped limits (no reset window) are still surfaced at 0% so the model's
+    limit is visible before it is first used; an existing top-level field is
+    never overwritten (it carries higher-precision data).
+
+    Parameters
+    ----------
+    data : dict
+        Raw usage API response.
+
+    Returns
+    -------
+    dict
+        The response with synthetic quota fields added for any model-scoped
+        limits not already present as top-level fields.
+    """
+    limits = data.get('limits')
+    if not isinstance(limits, list):
+        return data
+
+    # resets_at -> existing top-level quota field name (the prefix source)
+    reset_to_field: dict[str, str] = {}
+    for key, value in data.items():
+        if isinstance(value, dict) and value.get('utilization') is not None:
+            resets_at = value.get('resets_at')
+            if resets_at:
+                reset_to_field.setdefault(resets_at, key)
+
+    # group -> period prefix, via the non-scoped limit's shared reset time
+    group_prefix: dict[str, str] = {}
+    for limit in limits:
+        if not isinstance(limit, dict) or limit.get('scope'):
+            continue
+        group = limit.get('group')
+        resets_at = limit.get('resets_at')
+        if group and resets_at and resets_at in reset_to_field:
+            group_prefix.setdefault(group, reset_to_field[resets_at])
+
+    merged = dict(data)
+    for limit in limits:
+        if not isinstance(limit, dict):
+            continue
+        model = (limit.get('scope') or {}).get('model') or {}
+        display_name = model.get('display_name')
+        prefix = group_prefix.get(limit.get('group'))
+        if not display_name or not prefix:
+            continue
+
+        field = f'{prefix}_{_model_slug(display_name)}'
+        if merged.get(field) is not None:
+            continue
+        merged[field] = {'utilization': float(limit.get('percent') or 0), 'resets_at': limit.get('resets_at')}
+
+    return merged
+
+
+def _model_slug(display_name: str) -> str:
+    """Convert a model display name into a field-name suffix (e.g. ``'Fable'`` -> ``'fable'``)."""
+    cleaned = ''.join(char if char.isalnum() else ' ' for char in display_name.lower())
+    return '_'.join(cleaned.split())
 
 
 def _user_agent() -> str:

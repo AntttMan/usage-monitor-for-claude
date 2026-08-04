@@ -11,7 +11,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from usage_monitor_for_claude.app import UsageMonitorForClaude
+from usage_monitor_for_claude.app import POLL_FAST, UsageMonitorForClaude, _align_to_reset
 from usage_monitor_for_claude.cache import UpdateResult
 from usage_monitor_for_claude.claude_cli import RefreshResult
 
@@ -426,7 +426,7 @@ class TestExtraUsageAlerts(unittest.TestCase):
 
     def test_notification_includes_credit_amounts(self):
         """Notification message includes formatted credit amounts."""
-        with patch('usage_monitor_for_claude.app.format_credits', side_effect=lambda c: f'${c / 100:.2f}'):
+        with patch('usage_monitor_for_claude.app.format_credits', side_effect=lambda c, *_: f'${c / 100:.2f}'):
             self.app._check_extra_usage_alerts(self._extra_data(used=820, limit=1000))
 
         args = self.app.icon.notify.call_args[0]
@@ -1245,8 +1245,8 @@ class TestResetAlignment(unittest.TestCase):
         with patch.object(self.app, '_seconds_until_next_reset', return_value=160.0):
             interval = self.app._calculate_poll_interval()
 
-        # next_reset(160) + 5 = 165 <= interval(180) * 1.5 = 270, so aligned
-        # max(165, POLL_FAST=120) = 165
+        # next_reset(160) + RESET_BUFFER(5) = 165 <= interval(180) * 1.5 = 270,
+        # so the confirming poll is committed to just after the reset.
         self.assertEqual(interval, 165)
 
     def test_distant_reset_no_alignment(self):
@@ -1266,6 +1266,82 @@ class TestResetAlignment(unittest.TestCase):
             self.app._calculate_poll_interval()
 
         self.assertGreaterEqual(self.app._fast_polls_remaining, 2)
+
+
+# ---------------------------------------------------------------------------
+# _align_to_reset
+# ---------------------------------------------------------------------------
+
+class TestAlignToReset(unittest.TestCase):
+    """Tests for the pure _align_to_reset() poll-phase math.
+
+    RESET_BUFFER = 5, POLL_FAST = 120, so the "danger" window (where a poll
+    can no longer be exact) is the last 115 seconds before a reset.
+    """
+
+    def test_no_reset(self):
+        """No upcoming reset keeps the normal interval, no alignment."""
+        self.assertEqual(_align_to_reset(180, None), (180, False))
+
+    def test_non_positive_reset(self):
+        """A non-positive next_reset keeps the normal interval."""
+        self.assertEqual(_align_to_reset(180, 0.0), (180, False))
+
+    def test_distant_reset(self):
+        """A reset beyond one cadence plus the danger window is not aligned."""
+        self.assertEqual(_align_to_reset(180, 500.0), (180, False))
+
+    def test_near_reset_commits(self):
+        """A reset within one cadence commits the confirming poll just after it."""
+        self.assertEqual(_align_to_reset(180, 160.0), (165, True))
+
+    def test_commit_upper_edge(self):
+        """next_reset at the commit threshold still commits (post == interval*1.5)."""
+        self.assertEqual(_align_to_reset(180, 265.0), (270, True))
+
+    def test_cap_pulls_last_poll_forward(self):
+        """Just past the commit threshold, the next poll is pulled to the danger boundary."""
+        # 280 - danger(115) = 165 >= POLL_FAST, so cap to 165 -> next poll lands at T_pre.
+        self.assertEqual(_align_to_reset(180, 280.0), (165, True))
+
+    def test_cap_high_edge(self):
+        """Highest next_reset that still needs a cap (below interval + danger)."""
+        self.assertEqual(_align_to_reset(180, 294.0), (179, True))
+
+    def test_just_beyond_cap_is_normal(self):
+        """At interval + danger a normal poll already lands safely at the boundary."""
+        self.assertEqual(_align_to_reset(180, 295.0), (180, False))
+
+    def test_danger_zone_falls_back_to_poll_fast(self):
+        """Inside the last POLL_FAST window the confirming poll can only be POLL_FAST later."""
+        self.assertEqual(_align_to_reset(180, 100.0), (POLL_FAST, True))
+
+    def test_danger_boundary(self):
+        """Exactly at the danger boundary uses POLL_FAST (lands at reset + buffer)."""
+        self.assertEqual(_align_to_reset(180, 115.0), (POLL_FAST, True))
+
+    def test_fast_base_commits_directly(self):
+        """With a POLL_FAST base, a mid-range reset commits directly (cap would break cooldown)."""
+        # post(205) > 120*1.5=180 and pre(85) < POLL_FAST, so commit at post.
+        self.assertEqual(_align_to_reset(120, 200.0), (205, True))
+
+    def test_two_step_cap_then_commit_lands_after_reset(self):
+        """Cap to the danger boundary, then the follow-up commits exactly to reset + buffer."""
+        interval, aligned = _align_to_reset(180, 280.0)
+        self.assertEqual((interval, aligned), (165, True))
+        # After 165s the next poll sits at the danger boundary (115s before reset);
+        # the fast follow-up base (POLL_FAST) then lands POLL_FAST later = reset + buffer.
+        self.assertEqual(_align_to_reset(POLL_FAST, 115.0), (POLL_FAST, True))
+
+    def test_never_schedules_below_poll_fast(self):
+        """No aligned interval is ever shorter than POLL_FAST (the cache cooldown)."""
+        for base in (POLL_FAST, 180):
+            for next_reset in range(1, 601):
+                interval, _ = _align_to_reset(base, float(next_reset))
+                self.assertGreaterEqual(
+                    interval, POLL_FAST,
+                    f'base={base}, next_reset={next_reset} -> {interval} < POLL_FAST',
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,8 @@ Prioritize readability and auditability - users handle credentials and must be a
 - pywebview 6.x `resize()` **and** `move()` both expect **logical pixels** (pywebview applies DPI scaling internally for both)
 - `_tray_position()` still receives physical pixel dimensions (needed to calculate position against Win32 physical coordinates) and returns **logical coordinates** for `move()` - never change this to physical
 - `_tray_position()` uses `Shell_TrayWnd` + `MonitorFromWindow` + `GetMonitorInfoW` to find the monitor that owns the taskbar, then compares `work.left > mon.left` (not `> 0`) to detect a left-side taskbar - this correctly handles multi-monitor layouts where the primary monitor is not at virtual x=0
-- Never replace `resize()`/`move()` with direct `SetWindowPos` calls - pywebview's internal scaling means raw Win32 calls would fight with pywebview's coordinate handling
+- Never replace `resize()`/`move()` with direct `SetWindowPos` calls for tray-anchored positioning - pywebview's internal scaling means raw Win32 calls would fight with pywebview's coordinate handling. The one exception is the pinned-popup drag (next bullet)
+- The pinned-popup drag (`_begin_drag`/`_drag`/`_end_drag`) deliberately uses raw `SetWindowPos` with **physical** cursor coordinates (`GetCursorPos` minus the grab offset captured on mouse-down), not pywebview's `move()`. Reason: `move()` and JS `screenX` deltas are scaled by a single monitor's DPI, which jumps at a monitor boundary and makes the cursor drift off the window and the size break. After a drag that crosses a DPI boundary, `_end_drag` re-asserts the size once via `resize()` against the destination monitor's DPI. Do not collapse this back to `move()` - it reintroduces the mixed-DPI drift
 - The taskbar icon is hidden via Win32 extended styles (`WS_EX_TOOLWINDOW` + remove `WS_EX_APPWINDOW`). Do **not** use WinForms `ShowInTaskbar = False` - it recreates the native window handle, which crashes WebView2 from background threads
 
 ## Quota Fields
@@ -20,6 +21,7 @@ Prioritize readability and auditability - users handle credentials and must be a
 - A quota field is any dict entry with `utilization` and `resets_at` keys; `extra_usage` has a separate structure and is handled independently
 - Quota fields can be `null` in the API response (e.g. when a quota type is not enabled for the account) - always use `(data.get('key') or {})` instead of `data.get('key', {})` when chaining `.get()` calls, because the latter returns `None` when the key exists with a `null` value
 - Labels, periods, and sort order are derived from the field name via `parse_field_name()` - no per-field mapping tables
+- Model-scoped limits (e.g. a weekly Fable limit) arrive only inside the `limits` array via `scope.model`, not as top-level fields - `_merge_scoped_limits()` in `api.py` normalizes each into a synthetic top-level field (e.g. `seven_day_fable`) so all of the above applies unchanged. The period prefix is derived from the same-`group` non-scoped limit's shared `resets_at` (never hardcoded); an existing top-level field is never overwritten, and inactive scoped limits (no `resets_at`) are still surfaced at 0%
 - Locale files use template keys (`session_label`, `weekly_label`, `notify_threshold_generic`) - never add per-field translation keys
 
 ## Security & Transparency

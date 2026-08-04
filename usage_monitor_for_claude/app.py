@@ -36,10 +36,62 @@ from .tray_icon import create_icon_image, create_status_image, taskbar_uses_ligh
 
 __all__ = ['UsageMonitorForClaude', 'crash_log']
 
+# Seconds after a reset at which to place the confirming poll.  A small buffer
+# absorbs minor timing differences (clocks, caches, server-side propagation).
+RESET_BUFFER = 5
+
 
 def _future_iso(**kwargs: float) -> str:
     """Return an ISO 8601 timestamp offset from now by the given timedelta kwargs."""
     return (datetime.now(timezone.utc) + timedelta(**kwargs)).isoformat()
+
+
+def _align_to_reset(interval: int, next_reset: float | None) -> tuple[int, bool]:
+    """Shift the next poll so the confirming poll lands just after the reset.
+
+    Every returned interval stays at or above ``POLL_FAST`` (the cache
+    cooldown), so the reset is caught without polling faster.  The poll before
+    the reset is pulled forward to ``POLL_FAST`` seconds before it; from there
+    the confirming poll lands ``RESET_BUFFER`` seconds after the reset.  When
+    the current poll is already too close to pull the previous one forward
+    without breaking the cooldown, the confirming poll is committed directly.
+
+    Parameters
+    ----------
+    interval : int
+        The normal cadence interval before reset alignment.
+    next_reset : float or None
+        Seconds until the nearest upcoming reset, or None.
+
+    Returns
+    -------
+    tuple[int, bool]
+        The (possibly adjusted) interval and whether alignment engaged.
+    """
+    if next_reset is None or next_reset <= 0:
+        return interval, False
+
+    danger = POLL_FAST - RESET_BUFFER          # last window where a poll can no longer be exact
+    post = int(next_reset) + RESET_BUFFER      # offset that lands the poll just after the reset
+
+    if next_reset <= danger:
+        # Already inside that last window: the confirming poll can only land
+        # POLL_FAST after this one (small, unavoidable overshoot).
+        return POLL_FAST, True
+
+    if post <= interval * 1.5:
+        # Reset near enough: commit the confirming poll to just after it.
+        return post, True
+
+    if next_reset < interval + danger:
+        # A normal interval would drop the next poll into that last window,
+        # from where the confirming poll would overshoot.  Pull it forward to
+        # the window start (POLL_FAST before the reset); if that is too close
+        # to keep POLL_FAST spacing, commit to the confirming poll directly.
+        pre = int(next_reset) - danger
+        return (pre if pre >= POLL_FAST else post), True
+
+    return interval, False                     # reset still far - keep the normal cadence
 
 
 class UsageMonitorForClaude:
@@ -441,13 +493,17 @@ class UsageMonitorForClaude:
 
         if highest_exceeded > last_notified:
             title = T['notify_threshold_title']
+            currency = extra.get('currency')
+            decimal_places = extra.get('decimal_places')
+            used_text = format_credits(used, currency, decimal_places)
+            limit_text = format_credits(limit, currency, decimal_places)
             message = T['notify_threshold_extra_usage'].format(
-                pct=f'{pct:.0f}', used=format_credits(used), limit=format_credits(limit),
+                pct=f'{pct:.0f}', used=used_text, limit=limit_text,
             )
             self._notify_or_defer('threshold_extra_usage', message, title)
             self._run_threshold_command(
                 'extra_usage', pct, highest_exceeded, extra, title, message,
-                extra_used=format_credits(used), extra_limit=format_credits(limit),
+                extra_used=used_text, extra_limit=limit_text,
             )
             self._notified_thresholds['extra_usage'] = highest_exceeded
         elif highest_exceeded < last_notified:
@@ -478,8 +534,10 @@ class UsageMonitorForClaude:
         if extra.get('is_enabled'):
             limit = extra.get('monthly_limit', 0) or 0
             used = extra.get('used_credits', 0) or 0
-            env_vars['USAGE_MONITOR_EXTRA_USED'] = format_credits(used)
-            env_vars['USAGE_MONITOR_EXTRA_LIMIT'] = format_credits(limit)
+            currency = extra.get('currency')
+            decimal_places = extra.get('decimal_places')
+            env_vars['USAGE_MONITOR_EXTRA_USED'] = format_credits(used, currency, decimal_places)
+            env_vars['USAGE_MONITOR_EXTRA_LIMIT'] = format_credits(limit, currency, decimal_places)
 
         run_event_command(ON_STARTUP_COMMAND, env_vars)
 
@@ -574,13 +632,12 @@ class UsageMonitorForClaude:
         else:
             interval = POLL_INTERVAL
 
-        # Align next poll to an imminent reset for faster feedback.
-        # The +5s buffer guards against minor timing differences
-        # (clocks, caches, processing delays). Follow-up uses POLL_FAST
-        # regardless of user activity (quota was likely exhausted).
+        # Align the next poll around an imminent reset for faster feedback.
+        # The confirming poll is placed just after the reset; a follow-up uses
+        # POLL_FAST regardless of user activity (quota was likely exhausted).
         next_reset = self._seconds_until_next_reset()
-        if next_reset is not None and next_reset + 5 <= interval * 1.5:
-            interval = max(int(next_reset) + 5, POLL_FAST)
+        interval, aligned = _align_to_reset(interval, next_reset)
+        if aligned:
             self._fast_polls_remaining = max(self._fast_polls_remaining, 2)
 
         return interval
@@ -647,7 +704,7 @@ class UsageMonitorForClaude:
                     if ON_RESET_COMMAND:
                         next_reset = self._seconds_until_next_reset()
                         if next_reset is not None:
-                            reset_deadline = time.time() + next_reset + 5
+                            reset_deadline = time.time() + next_reset + RESET_BUFFER
                             self._idle_reset_pending = True
                         elif self._idle_reset_pending:
                             reset_deadline = time.time() + POLL_INTERVAL

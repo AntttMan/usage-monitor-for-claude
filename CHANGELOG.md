@@ -11,12 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The detail popup's usage-credits section (renamed from "Extra usage" to "Usage credits") now shows your monthly spend limit and current credit balance, and it appears even on an unlimited plan so your spend is always visible - previously the whole section was hidden whenever the monthly limit was unlimited
 
+[Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.18.0...HEAD)
+
+## [1.18.0] - 2026-07-02
+
+### Added
+
+- Per-model weekly limits (for example a Fable limit) now appear as their own usage bar, tooltip entry, and alert - Claude's newer usage data reports model-scoped limits in a format the app did not read before, so such a limit would otherwise stay invisible until it blocked you
+- Extra usage amounts now show in the account's actual billing currency and precision - Claude's usage data now reports the currency and decimal places, so the amount no longer guesses the symbol from the Windows locale and stays correct even when the billing currency differs from the system's
+
+### Fixed
+
+- Usage now refreshes right after a session limit resets instead of up to a few minutes late - the poll that confirms the reset is timed to land just after it, so the tray icon and popup stop showing the old, exhausted state
+- The reset time no longer vanishes from the popup during the last minute before a reset - it now shows a "Reset imminent" note (matching Claude's own usage screen) instead of leaving the line blank
+
+[Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.17.0...v1.18.0)
+
+## [1.17.0] - 2026-06-27
+
+### Added
+
+- The detail popup can now be pinned open and moved while pinned, so usage details stay visible during long Claude Code sessions (thanks to [@nmxi](https://github.com/nmxi) for the contribution)
+- [New `compact_hide` setting](https://github.com/jens-duttke/usage-monitor-for-claude/issues/55) shrinks the pinned popup to a compact view by hiding chosen sections (account, extra usage, Claude Code versions, status footer) and individual usage bars while it is pinned, so you can keep just the bars you care about on screen; when only the usage bars remain, the "Usage" heading is dropped as well
+- Reset times now follow your Windows clock format automatically, showing 24-hour (14:30) or 12-hour (2:30 PM) without any setup; override with the `time_format` setting (thanks to [@rohitjalan142](https://github.com/rohitjalan142) for the contribution)
+
 ### Fixed
 
 - Per-model weekly limits (such as Fable) are now shown again - the usage API moved these limits out of the flat `seven_day_<model>` fields into a new `limits` array, so they had stopped appearing in the popup and no longer triggered threshold alerts; they are now detected from the new structure and displayed as their own usage bars like before
 - [The status footer no longer cuts off text in several languages](https://github.com/jens-duttke/usage-monitor-for-claude/issues/53) - the "next update" line was too long to fit the popup width in Spanish, French, Italian, Portuguese, Ukrainian, and Indonesian and got truncated; the affected phrases are now shorter so the full status fits on one line, and a long error message now shows in full on hover
 
-[Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.16.0...HEAD)
+[Show all code changes](https://github.com/jens-duttke/usage-monitor-for-claude/compare/v1.16.0...v1.17.0)
 
 ## [1.16.0] - 2026-06-13
 
