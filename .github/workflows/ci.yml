@@ -34,7 +34,11 @@ jobs:
       - name: Run tests
         run: |
           set +e
-          pytest -v
+          # `python -m pytest`, not bare `pytest`: -m puts the working directory
+          # on sys.path. This repo's package sits at the repo root with no
+          # pyproject.toml, so the install step above takes the requirements.txt
+          # branch — deps but not the package — and bare pytest cannot import it.
+          python -m pytest -v
           code=$?
           # exit 5 = "no tests collected" — treat as pass for projects without tests yet
           if [ $code -eq 5 ]; then
